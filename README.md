@@ -44,7 +44,7 @@ curl -X POST http://127.0.0.1:3100/api/plugins/install \
 
 ## Credits
 
-Notification event handler patterns adapted from PR [#398](https://github.com/paperclipai/paperclip/pull/398) by [@StartupBros](https://github.com/StartupBros). Intelligence architecture informed by the [OSC Discord](https://github.com/mvanhorn/open-source-contributor) role-weighted signal extraction approach.
+Notification event handler patterns adapted from PR [#398](https://github.com/paperclipai/paperclip/pull/398) by [@StartupBros](https://github.com/StartupBros).
 
 ## Development
 
