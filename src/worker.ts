@@ -1,5 +1,6 @@
 import {
   definePlugin,
+  runWorker,
   type PluginContext,
   type PluginEvent,
   type PluginWebhookInput,
@@ -48,9 +49,10 @@ async function resolveChannel(
   return (override as string) ?? fallback ?? null;
 }
 
-export default definePlugin({
+const plugin = definePlugin({
   async setup(ctx) {
     const rawConfig = await ctx.config.get();
+    ctx.logger.info(`Discord plugin config: ${JSON.stringify(rawConfig)}`);
     const config = rawConfig as unknown as DiscordConfig;
 
     if (!config.discordBotTokenRef) {
@@ -275,3 +277,5 @@ export default definePlugin({
     return { status: "ok" };
   },
 });
+
+runWorker(plugin, import.meta.url);

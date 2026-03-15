@@ -28,7 +28,7 @@ const manifest: PaperclipPluginManifestV1 = {
     "http.outbound",
     "secrets.read-ref",
     "webhooks.receive",
-    "instance.settings.register",
+    // "instance.settings.register",  // no UI in this repo
     "activity.log.write",
     "metrics.write",
     "agent.tools.register",
@@ -150,16 +150,17 @@ const manifest: PaperclipPluginManifestV1 = {
         "Receives Discord slash command and button interaction payloads.",
     },
   ],
-  ui: {
-    slots: [
-      {
-        type: "settingsPage",
-        id: SLOT_IDS.settingsPage,
-        displayName: "Discord Settings",
-        exportName: EXPORT_NAMES.settingsPage,
-      },
-    ],
-  },
+  // UI disabled — no settings page source in this repo
+  // ui: {
+  //   slots: [
+  //     {
+  //       type: "settingsPage",
+  //       id: SLOT_IDS.settingsPage,
+  //       displayName: "Discord Settings",
+  //       exportName: EXPORT_NAMES.settingsPage,
+  //     },
+  //   ],
+  // },
 };
 
 export default manifest;
