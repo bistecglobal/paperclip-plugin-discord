@@ -20,7 +20,7 @@ import {
   formatAgentRunFinished,
 } from "./formatters.js";
 import { handleInteraction, SLASH_COMMANDS } from "./commands.js";
-import { runIntelligenceScan } from "./intelligence.js";
+import { runIntelligenceScan, runBackfill } from "./intelligence.js";
 
 type DiscordConfig = {
   discordBotTokenRef: string;
@@ -32,6 +32,7 @@ type DiscordConfig = {
   notifyOnAgentError: boolean;
   enableIntelligence: boolean;
   intelligenceChannelIds: string[];
+  backfillDays: number;
 };
 
 async function resolveChannel(
@@ -204,6 +205,46 @@ export default definePlugin({
       });
       ctx.logger.info("Intelligence scan job registered", {
         channels: config.intelligenceChannelIds.length,
+      });
+    }
+
+    // --- Backfill: auto-run on first install ---
+
+    if (config.enableIntelligence && config.intelligenceChannelIds.length > 0) {
+      const existing = await ctx.state.get({
+        scopeKind: "company",
+        scopeId: "default",
+        stateKey: "discord_intelligence",
+      }) as { backfillComplete?: boolean } | null;
+
+      if (!existing?.backfillComplete) {
+        ctx.logger.info("First install detected, starting historical backfill...");
+        await runBackfill(
+          ctx,
+          token,
+          config.defaultGuildId,
+          config.intelligenceChannelIds,
+          "default",
+          config.backfillDays ?? 90,
+        );
+      }
+
+      // On-demand re-backfill action
+      ctx.actions.register("trigger-backfill", async () => {
+        // Clear the flag so backfill runs fresh
+        await ctx.state.set(
+          { scopeKind: "company", scopeId: "default", stateKey: "discord_intelligence" },
+          { signals: [], backfillComplete: false },
+        );
+        const signals = await runBackfill(
+          ctx,
+          token,
+          config.defaultGuildId,
+          config.intelligenceChannelIds,
+          "default",
+          config.backfillDays ?? 90,
+        );
+        return { ok: true, signalsFound: signals.length };
       });
     }
 

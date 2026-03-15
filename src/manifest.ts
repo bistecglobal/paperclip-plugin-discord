@@ -93,6 +93,15 @@ const manifest: PaperclipPluginManifestV1 = {
         description: "Channel IDs to scan for community signals.",
         default: DEFAULT_CONFIG.intelligenceChannelIds,
       },
+      backfillDays: {
+        type: "number",
+        title: "Backfill history (days)",
+        description:
+          "How many days of Discord message history to scan on first install. Set to 0 to skip backfill.",
+        default: 90,
+        minimum: 0,
+        maximum: 365,
+      },
     },
     required: ["discordBotTokenRef", "defaultChannelId"],
   },

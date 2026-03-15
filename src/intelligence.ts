@@ -3,9 +3,14 @@ import {
   type DiscordChannelMessage,
   type DiscordGuildRole,
   getChannelMessages,
+  getChannelMessagesAll,
   getGuildRoles,
 } from "./discord-api.js";
 import {
+  BACKFILL_DEFAULT_DAYS,
+  BACKFILL_MAX_MESSAGES_PER_CHANNEL,
+  BACKFILL_PAGE_DELAY_MS,
+  BACKFILL_SIGNAL_CAP,
   DEFAULT_ROLE_WEIGHT,
   METRIC_NAMES,
   ROLE_WEIGHTS,
@@ -185,4 +190,97 @@ export async function runIntelligenceScan(
   });
 
   return allSignals;
+}
+
+export function mergeSignals(existing: Signal[], incoming: Signal[]): Signal[] {
+  const seen = new Set(existing.map((s) => s.messageId));
+  const merged = [...existing];
+  for (const s of incoming) {
+    if (!seen.has(s.messageId)) {
+      merged.push(s);
+      seen.add(s.messageId);
+    }
+  }
+  merged.sort((a, b) => {
+    if (b.authorWeight !== a.authorWeight) return b.authorWeight - a.authorWeight;
+    return b.timestamp.localeCompare(a.timestamp);
+  });
+  return merged;
+}
+
+export async function runBackfill(
+  ctx: PluginContext,
+  token: string,
+  guildId: string,
+  channelIds: string[],
+  companyId: string,
+  backfillDays: number = BACKFILL_DEFAULT_DAYS,
+): Promise<Signal[]> {
+  if (channelIds.length === 0) return [];
+
+  ctx.logger.info("Starting historical backfill", {
+    channels: channelIds.length,
+    days: backfillDays,
+  });
+
+  const roles = await getGuildRoles(ctx, token, guildId);
+  const roleWeightMap = buildRoleWeightMap(roles);
+
+  const allSignals: Signal[] = [];
+
+  for (let i = 0; i < channelIds.length; i++) {
+    const channelId = channelIds[i]!;
+    ctx.logger.info(`Backfilling channel ${i + 1}/${channelIds.length}`, { channelId });
+
+    const messages = await getChannelMessagesAll(ctx, token, channelId, {
+      maxMessages: BACKFILL_MAX_MESSAGES_PER_CHANNEL,
+      maxAgeDays: backfillDays,
+      pageDelayMs: BACKFILL_PAGE_DELAY_MS,
+      onProgress: (fetched) => {
+        if (fetched % 500 === 0) {
+          ctx.logger.info(`  ...${fetched} messages fetched`, { channelId });
+        }
+      },
+    });
+
+    ctx.logger.info(`  ${messages.length} messages fetched`, { channelId });
+
+    const signals = extractSignals(messages, roleWeightMap, channelId);
+    allSignals.push(...signals);
+  }
+
+  // Load existing signals and merge (dedup by messageId)
+  const existing = await ctx.state.get({
+    scopeKind: "company",
+    scopeId: companyId,
+    stateKey: "discord_intelligence",
+  }) as { signals?: Signal[] } | null;
+
+  const existingSignals = existing?.signals ?? [];
+  const merged = mergeSignals(existingSignals, allSignals);
+
+  await ctx.state.set(
+    {
+      scopeKind: "company",
+      scopeId: companyId,
+      stateKey: "discord_intelligence",
+    },
+    {
+      signals: merged.slice(0, BACKFILL_SIGNAL_CAP),
+      lastScanned: new Date().toISOString(),
+      backfillComplete: true,
+      backfilledAt: new Date().toISOString(),
+      channelsScanned: channelIds.length,
+      totalMessagesScanned: allSignals.length,
+    },
+  );
+
+  await ctx.metrics.write(METRIC_NAMES.signalsExtracted, allSignals.length);
+  ctx.logger.info("Backfill complete", {
+    newSignals: allSignals.length,
+    totalStored: Math.min(merged.length, BACKFILL_SIGNAL_CAP),
+    channels: channelIds.length,
+  });
+
+  return merged.slice(0, BACKFILL_SIGNAL_CAP);
 }

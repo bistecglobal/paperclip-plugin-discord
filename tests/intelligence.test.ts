@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractSignals, type Signal } from "../src/intelligence.js";
+import { extractSignals, mergeSignals, type Signal } from "../src/intelligence.js";
 import type { DiscordChannelMessage } from "../src/discord-api.js";
 
 function makeMessage(
@@ -94,5 +94,58 @@ describe("extractSignals", () => {
     const messages = [makeMessage({ content: longContent })];
     const signals = extractSignals(messages, ROLE_WEIGHT_MAP, "ch-1");
     expect(signals[0]?.text.length).toBeLessThanOrEqual(500);
+  });
+});
+
+function makeSignal(overrides: Partial<Signal> = {}): Signal {
+  return {
+    category: "feature_wish",
+    text: "I wish we had better logging",
+    author: "testuser",
+    authorWeight: 1,
+    channelId: "ch-1",
+    timestamp: "2026-03-15T12:00:00Z",
+    messageId: "msg-1",
+    ...overrides,
+  };
+}
+
+describe("mergeSignals", () => {
+  it("deduplicates by messageId", () => {
+    const existing = [makeSignal({ messageId: "msg-1" })];
+    const incoming = [
+      makeSignal({ messageId: "msg-1", text: "duplicate" }),
+      makeSignal({ messageId: "msg-2", text: "new signal" }),
+    ];
+    const merged = mergeSignals(existing, incoming);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((s) => s.messageId)).toContain("msg-1");
+    expect(merged.map((s) => s.messageId)).toContain("msg-2");
+  });
+
+  it("keeps original when duplicate exists", () => {
+    const existing = [makeSignal({ messageId: "msg-1", text: "original" })];
+    const incoming = [makeSignal({ messageId: "msg-1", text: "should be ignored" })];
+    const merged = mergeSignals(existing, incoming);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.text).toBe("original");
+  });
+
+  it("sorts by weight descending, then timestamp descending", () => {
+    const existing = [makeSignal({ messageId: "msg-1", authorWeight: 1, timestamp: "2026-03-10T00:00:00Z" })];
+    const incoming = [
+      makeSignal({ messageId: "msg-2", authorWeight: 5, timestamp: "2026-03-12T00:00:00Z" }),
+      makeSignal({ messageId: "msg-3", authorWeight: 3, timestamp: "2026-03-14T00:00:00Z" }),
+    ];
+    const merged = mergeSignals(existing, incoming);
+    expect(merged[0]?.authorWeight).toBe(5);
+    expect(merged[1]?.authorWeight).toBe(3);
+    expect(merged[2]?.authorWeight).toBe(1);
+  });
+
+  it("handles empty inputs", () => {
+    expect(mergeSignals([], [])).toHaveLength(0);
+    expect(mergeSignals([makeSignal()], [])).toHaveLength(1);
+    expect(mergeSignals([], [makeSignal()])).toHaveLength(1);
   });
 });

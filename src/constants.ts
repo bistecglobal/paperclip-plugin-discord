@@ -1,5 +1,5 @@
 export const PLUGIN_ID = "paperclip-plugin-discord";
-export const PLUGIN_VERSION = "0.1.0";
+export const PLUGIN_VERSION = "0.1.1";
 
 export const WEBHOOK_KEYS = {
   discordInteractions: "discord-interactions",
@@ -53,3 +53,8 @@ export const ROLE_WEIGHTS: Record<string, number> = {
   cliptributor: 3,
 };
 export const DEFAULT_ROLE_WEIGHT = 1;
+
+export const BACKFILL_MAX_MESSAGES_PER_CHANNEL = 5000;
+export const BACKFILL_PAGE_DELAY_MS = 500;
+export const BACKFILL_DEFAULT_DAYS = 90;
+export const BACKFILL_SIGNAL_CAP = 200;

@@ -156,6 +156,60 @@ export async function getChannelMessages(
   }
 }
 
+export async function getChannelMessagesAll(
+  ctx: PluginContext,
+  token: string,
+  channelId: string,
+  opts: {
+    maxMessages?: number;
+    maxAgeDays?: number;
+    pageDelayMs?: number;
+    onProgress?: (fetched: number) => void;
+  } = {},
+): Promise<DiscordChannelMessage[]> {
+  const maxMessages = opts.maxMessages ?? 5000;
+  const maxAgeDays = opts.maxAgeDays ?? 90;
+  const pageDelayMs = opts.pageDelayMs ?? 500;
+  const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000).toISOString();
+
+  const allMessages: DiscordChannelMessage[] = [];
+  let before: string | undefined;
+
+  while (allMessages.length < maxMessages) {
+    const query = before
+      ? `/channels/${channelId}/messages?limit=100&before=${before}`
+      : `/channels/${channelId}/messages?limit=100`;
+
+    try {
+      const response = await discordFetch(ctx, token, query);
+      if (!response.ok) break;
+
+      const page = (await response.json()) as DiscordChannelMessage[];
+      if (page.length === 0) break;
+
+      for (const msg of page) {
+        if (msg.timestamp < cutoff) {
+          // Reached max age cutoff
+          return allMessages;
+        }
+        allMessages.push(msg);
+      }
+
+      before = page[page.length - 1]!.id;
+      opts.onProgress?.(allMessages.length);
+
+      // Rate limit delay between pages
+      if (pageDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, pageDelayMs));
+      }
+    } catch {
+      break;
+    }
+  }
+
+  return allMessages;
+}
+
 export async function getGuildRoles(
   ctx: PluginContext,
   token: string,
