@@ -73,3 +73,7 @@ export const BACKFILL_SIGNAL_CAP = 200;
 
 export const ESCALATION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 export const ESCALATION_CHECK_INTERVAL_CRON = "*/5 * * * *"; // every 5 minutes
+
+export const MAX_AGENTS_PER_THREAD = 5;
+export const MAX_CONVERSATION_TURNS = 50;
+export const DISCUSSION_STALE_MS = 5 * 60 * 1000; // 5 minutes without activity = stale

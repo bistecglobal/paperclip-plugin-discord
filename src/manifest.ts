@@ -160,6 +160,15 @@ const manifest: PaperclipPluginManifestV1 = {
         minimum: 5,
         maximum: 1440,
       },
+      maxAgentsPerThread: {
+        type: "number",
+        title: "Max agents per thread",
+        description:
+          "Maximum number of concurrent agent sessions allowed in a single Discord thread.",
+        default: 5,
+        minimum: 1,
+        maximum: 10,
+      },
     },
     required: ["discordBotTokenRef", "defaultChannelId"],
   },
@@ -255,6 +264,74 @@ const manifest: PaperclipPluginManifestV1 = {
           },
         },
         required: ["companyId", "agentName", "reason"],
+      },
+    },
+    {
+      name: "handoff_to_agent",
+      displayName: "Handoff to Agent",
+      description:
+        "Hand off a conversation to another agent in the same Discord thread. Requires human approval via button click before the handoff executes.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          threadId: {
+            type: "string",
+            description: "Discord thread ID where both agents reside",
+          },
+          fromAgent: {
+            type: "string",
+            description: "Name of the agent initiating the handoff",
+          },
+          toAgent: {
+            type: "string",
+            description: "Name of the target agent to hand off to",
+          },
+          reason: {
+            type: "string",
+            description: "Why this handoff is being requested",
+          },
+          context: {
+            type: "string",
+            description: "Context or summary to pass to the target agent",
+          },
+        },
+        required: ["threadId", "fromAgent", "toAgent", "reason"],
+      },
+    },
+    {
+      name: "discuss_with_agent",
+      displayName: "Discuss with Agent",
+      description:
+        "Start a multi-turn conversation loop between two agents in a Discord thread. Includes human checkpoints and max turn enforcement.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          threadId: {
+            type: "string",
+            description: "Discord thread ID where both agents reside",
+          },
+          initiator: {
+            type: "string",
+            description: "Name of the agent starting the discussion",
+          },
+          target: {
+            type: "string",
+            description: "Name of the agent to discuss with",
+          },
+          topic: {
+            type: "string",
+            description: "Topic or question to discuss",
+          },
+          maxTurns: {
+            type: "number",
+            description: "Maximum number of turns (default: 10, max: 50)",
+          },
+          humanCheckpointInterval: {
+            type: "number",
+            description: "Pause for human approval every N turns (0 = no checkpoints)",
+          },
+        },
+        required: ["threadId", "initiator", "target", "topic"],
       },
     },
   ],

@@ -2,7 +2,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import { type DiscordEmbed, respondToInteraction } from "./discord-api.js";
 import { COLORS, METRIC_NAMES } from "./constants.js";
 import { withRetry } from "./retry.js";
-import { handleAcpCommand } from "./acp-bridge.js";
+import { handleAcpCommand, handleHandoffButton, handleDiscussionButton } from "./acp-bridge.js";
 
 interface InteractionOption {
   name: string;
@@ -413,6 +413,15 @@ async function handleButtonClick(
 
   if (customId.startsWith("esc_")) {
     return handleEscalationButton(ctx, customId, actor, base);
+  }
+
+  if (customId.startsWith("handoff_")) {
+    // Token is not available here, but handleHandoffButton uses respondToInteraction pattern
+    return handleHandoffButton(ctx, "", customId, actor);
+  }
+
+  if (customId.startsWith("disc_")) {
+    return handleDiscussionButton(ctx, "", customId, actor);
   }
 
   if (customId.startsWith("approval_reject_")) {

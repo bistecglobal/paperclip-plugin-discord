@@ -25,7 +25,16 @@ import {
 import { handleInteraction, SLASH_COMMANDS, type CommandContext } from "./commands.js";
 import { runIntelligenceScan, runBackfill } from "./intelligence.js";
 import { connectGateway } from "./gateway.js";
-import { handleAcpOutput, routeMessageToAcp, createAcpThread } from "./acp-bridge.js";
+import {
+  handleAcpOutput,
+  routeMessageToAcp,
+  createAcpThread,
+  spawnAgentInThread,
+  getThreadStatus,
+  closeAgentInThread,
+  initiateHandoff,
+  startDiscussion,
+} from "./acp-bridge.js";
 import { DiscordAdapter } from "./adapter.js";
 
 type DiscordConfig = {
@@ -47,6 +56,7 @@ type DiscordConfig = {
   escalationChannelId: string;
   enableEscalations: boolean;
   escalationTimeoutMinutes: number;
+  maxAgentsPerThread: number;
 };
 
 interface EscalationRecord {
@@ -481,6 +491,90 @@ const plugin = definePlugin({
             escalationId,
             status: "pending",
             message: "Escalation has been posted to Discord for human review.",
+          }),
+        };
+      },
+    );
+
+    // --- Multi-agent tools: handoff and discussion ---
+
+    const maxAgents = config.maxAgentsPerThread || 5;
+
+    ctx.tools.register(
+      "handoff_to_agent",
+      {
+        displayName: "Handoff to Agent",
+        description:
+          "Hand off a conversation to another agent in the same Discord thread. Requires human approval via button click.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            threadId: { type: "string", description: "Discord thread ID" },
+            fromAgent: { type: "string", description: "Agent initiating the handoff" },
+            toAgent: { type: "string", description: "Target agent name" },
+            reason: { type: "string", description: "Reason for the handoff" },
+            context: { type: "string", description: "Context to pass to target agent" },
+          },
+          required: ["threadId", "fromAgent", "toAgent", "reason"],
+        },
+      },
+      async (params) => {
+        const p = params as Record<string, unknown>;
+        const result = await initiateHandoff(
+          ctx,
+          token,
+          String(p.threadId),
+          String(p.fromAgent),
+          String(p.toAgent),
+          String(p.reason),
+          p.context ? String(p.context) : undefined,
+        );
+        return {
+          content: JSON.stringify({
+            handoffId: result.handoffId,
+            status: result.status,
+            message: "Handoff posted to Discord for human approval.",
+          }),
+        };
+      },
+    );
+
+    ctx.tools.register(
+      "discuss_with_agent",
+      {
+        displayName: "Discuss with Agent",
+        description:
+          "Start a multi-turn conversation loop between two agents in a Discord thread.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            threadId: { type: "string", description: "Discord thread ID" },
+            initiator: { type: "string", description: "Agent starting the discussion" },
+            target: { type: "string", description: "Agent to discuss with" },
+            topic: { type: "string", description: "Topic or question to discuss" },
+            maxTurns: { type: "number", description: "Max turns (default 10, max 50)" },
+            humanCheckpointInterval: { type: "number", description: "Pause for human approval every N turns (0 = no checkpoints)" },
+          },
+          required: ["threadId", "initiator", "target", "topic"],
+        },
+      },
+      async (params) => {
+        const p = params as Record<string, unknown>;
+        const result = await startDiscussion(
+          ctx,
+          token,
+          String(p.threadId),
+          String(p.initiator),
+          String(p.target),
+          String(p.topic),
+          p.maxTurns ? Number(p.maxTurns) : 10,
+          p.humanCheckpointInterval ? Number(p.humanCheckpointInterval) : 0,
+        );
+        return {
+          content: JSON.stringify({
+            discussionId: result.discussionId,
+            status: result.status,
+            message: "Discussion loop started.",
           }),
         };
       },
