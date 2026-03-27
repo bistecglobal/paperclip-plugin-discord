@@ -1,6 +1,7 @@
 import type { PluginContext } from "@paperclipai/plugin-sdk";
 import { postEmbedWithId } from "./discord-api.js";
 import { COLORS } from "./constants.js";
+import { paperclipFetch } from "./paperclip-fetch.js";
 
 // ---------------------------------------------------------------------------
 // Workflow Engine — sequential step execution with template interpolation
@@ -125,7 +126,7 @@ async function execFetchIssue(
   if (!issueId) return { ok: false, error: "Missing issueId" };
 
   try {
-    const resp = await ctx.http.fetch(`${baseUrl}/api/issues/${issueId}`, {
+    const resp = await paperclipFetch(`${baseUrl}/api/issues/${issueId}`, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
     });
@@ -180,7 +181,7 @@ async function execHttpRequest(
   }
 
   try {
-    const resp = await ctx.http.fetch(url, init);
+    const resp = await paperclipFetch(url, init);
     let data: unknown;
     const ct = resp.headers.get("content-type") ?? "";
     if (ct.includes("json")) {
@@ -243,7 +244,7 @@ async function execCreateIssue(
   if (step.assigneeAgentId) payload.assigneeAgentId = interpolate(step.assigneeAgentId, wfCtx);
 
   try {
-    const resp = await ctx.http.fetch(`${baseUrl}/api/companies/${companyId}/issues`, {
+    const resp = await paperclipFetch(`${baseUrl}/api/companies/${companyId}/issues`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

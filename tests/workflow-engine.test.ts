@@ -10,6 +10,17 @@ import {
   type WorkflowCommandStore,
 } from "../src/workflow-engine.js";
 
+const mockPaperclipFetch = vi.fn().mockResolvedValue({
+  ok: true,
+  status: 200,
+  json: () => Promise.resolve({ id: "issue-1", title: "Test Issue" }),
+  text: () => Promise.resolve("ok"),
+  headers: { get: () => "application/json" },
+});
+vi.mock("../src/paperclip-fetch.js", () => ({
+  paperclipFetch: (...args: unknown[]) => mockPaperclipFetch(...args),
+}));
+
 function makeCtx(stateMap: Map<string, unknown> = new Map()) {
   return {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -37,6 +48,16 @@ function makeCtx(stateMap: Map<string, unknown> = new Map()) {
   } as any;
 }
 
+beforeEach(() => {
+  mockPaperclipFetch.mockReset().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({ id: "issue-1", title: "Test Issue" }),
+    text: () => Promise.resolve("ok"),
+    headers: { get: () => "application/json" },
+  });
+});
+
 const baseOpts = {
   token: "test-token",
   channelId: "ch-1",
@@ -52,7 +73,7 @@ const baseOpts = {
 describe("runWorkflow — template interpolation", () => {
   it("interpolates {{args}} and {{arg0}}", async () => {
     const ctx = makeCtx();
-    ctx.http.fetch.mockResolvedValue({
+    mockPaperclipFetch.mockResolvedValue({
       ok: true, status: 200,
       json: () => Promise.resolve({ id: "i-1" }),
       headers: { get: () => "application/json" },
@@ -66,7 +87,7 @@ describe("runWorkflow — template interpolation", () => {
 
     const result = await runWorkflow({ ...baseOpts, ctx, workflow: wf, args: "my-issue-id extra" });
     expect(result.ok).toBe(true);
-    expect(ctx.http.fetch).toHaveBeenCalledWith(
+    expect(mockPaperclipFetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/issues/my-issue-id"),
       expect.anything(),
     );
@@ -91,7 +112,7 @@ describe("runWorkflow — template interpolation", () => {
 
   it("interpolates {{step_id.result}}", async () => {
     const ctx = makeCtx();
-    ctx.http.fetch.mockResolvedValue({
+    mockPaperclipFetch.mockResolvedValue({
       ok: true, status: 200,
       json: () => Promise.resolve({ id: "i-1", title: "My Issue" }),
       headers: { get: () => "application/json" },
@@ -119,7 +140,7 @@ describe("runWorkflow — template interpolation", () => {
 describe("runWorkflow — step types", () => {
   it("fetch_issue succeeds", async () => {
     const ctx = makeCtx();
-    ctx.http.fetch.mockResolvedValue({
+    mockPaperclipFetch.mockResolvedValue({
       ok: true, status: 200,
       json: () => Promise.resolve({ id: "i-1", title: "Test" }),
       headers: { get: () => "application/json" },
@@ -177,7 +198,7 @@ describe("runWorkflow — step types", () => {
 
   it("http_request makes fetch call", async () => {
     const ctx = makeCtx();
-    ctx.http.fetch.mockResolvedValue({
+    mockPaperclipFetch.mockResolvedValue({
       ok: true, status: 200,
       json: () => Promise.resolve({ data: "response" }),
       headers: { get: () => "application/json" },
@@ -191,7 +212,7 @@ describe("runWorkflow — step types", () => {
 
     const result = await runWorkflow({ ...baseOpts, ctx, workflow: wf, args: "" });
     expect(result.ok).toBe(true);
-    expect(ctx.http.fetch).toHaveBeenCalledWith("https://example.com/api", expect.objectContaining({ method: "POST" }));
+    expect(mockPaperclipFetch).toHaveBeenCalledWith("https://example.com/api", expect.objectContaining({ method: "POST" }));
   });
 
   it("http_request fails without url", async () => {
@@ -235,7 +256,7 @@ describe("runWorkflow — step types", () => {
 
   it("create_issue calls API with payload", async () => {
     const ctx = makeCtx();
-    ctx.http.fetch.mockResolvedValue({
+    mockPaperclipFetch.mockResolvedValue({
       ok: true, status: 201,
       json: () => Promise.resolve({ id: "new-issue" }),
       headers: { get: () => "application/json" },
@@ -254,7 +275,7 @@ describe("runWorkflow — step types", () => {
 
     const result = await runWorkflow({ ...baseOpts, ctx, workflow: wf, args: "login-broken" });
     expect(result.ok).toBe(true);
-    expect(ctx.http.fetch).toHaveBeenCalledWith(
+    expect(mockPaperclipFetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/companies/company-1/issues"),
       expect.objectContaining({
         method: "POST",
@@ -312,7 +333,7 @@ describe("runWorkflow — step types", () => {
 describe("runWorkflow — multi-step and errors", () => {
   it("stops on step failure", async () => {
     const ctx = makeCtx();
-    ctx.http.fetch.mockResolvedValueOnce({
+    mockPaperclipFetch.mockResolvedValueOnce({
       ok: false, status: 404,
       json: () => Promise.resolve({}),
       headers: { get: () => "application/json" },

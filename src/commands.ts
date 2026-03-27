@@ -2,6 +2,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import { type DiscordEmbed, respondToInteraction } from "./discord-api.js";
 import { COLORS, METRIC_NAMES } from "./constants.js";
 import { withRetry } from "./retry.js";
+import { paperclipFetch } from "./paperclip-fetch.js";
 import { handleHandoffButton, handleDiscussionButton, handleAcpCommand } from "./session-registry.js";
 import { resolveCompanyId } from "./company-resolver.js";
 import {
@@ -440,7 +441,7 @@ async function handleApprove(
   try {
     const url = `${baseUrl ?? "http://localhost:3100"}/api/approvals/${approvalId}/approve`;
     await withRetry(() =>
-      ctx.http.fetch(url, {
+      paperclipFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decidedByUserId: `discord:${username ?? "unknown"}` }),
@@ -863,16 +864,33 @@ async function handleButtonClick(
     ctx.logger.info("Approval button clicked", { approvalId, action: "approve", actor });
 
     try {
-      await withRetry(() =>
-        ctx.http.fetch(`${base}/api/approvals/${approvalId}/approve`, {
+      const resp = await withRetry(() =>
+        paperclipFetch(`${base}/api/approvals/${approvalId}/approve`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ decidedByUserId: `discord:${actor}` }),
         }),
       );
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        throw new Error(`API ${resp.status}: ${body}`);
+      }
       await ctx.metrics.write(METRIC_NAMES.approvalsDecided, 1);
     } catch (err) {
       ctx.logger.error("Failed to approve via API", { approvalId, error: String(err) });
+      return {
+        type: 7,
+        data: {
+          embeds: [{
+            title: "Approval Failed",
+            description: `Could not approve — ${err instanceof Error ? err.message : String(err)}`,
+            color: COLORS.RED,
+            footer: { text: "Paperclip" },
+            timestamp: new Date().toISOString(),
+          }],
+          components: [],
+        },
+      };
     }
 
     return {
@@ -895,16 +913,33 @@ async function handleButtonClick(
     ctx.logger.info("Rejection button clicked", { approvalId, action: "reject", actor });
 
     try {
-      await withRetry(() =>
-        ctx.http.fetch(`${base}/api/approvals/${approvalId}/reject`, {
+      const resp = await withRetry(() =>
+        paperclipFetch(`${base}/api/approvals/${approvalId}/reject`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ decidedByUserId: `discord:${actor}` }),
         }),
       );
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        throw new Error(`API ${resp.status}: ${body}`);
+      }
       await ctx.metrics.write(METRIC_NAMES.approvalsDecided, 1);
     } catch (err) {
       ctx.logger.error("Failed to reject via API", { approvalId, error: String(err) });
+      return {
+        type: 7,
+        data: {
+          embeds: [{
+            title: "Rejection Failed",
+            description: `Could not reject — ${err instanceof Error ? err.message : String(err)}`,
+            color: COLORS.RED,
+            footer: { text: "Paperclip" },
+            timestamp: new Date().toISOString(),
+          }],
+          components: [],
+        },
+      };
     }
 
     return {

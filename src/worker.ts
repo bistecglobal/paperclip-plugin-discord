@@ -7,6 +7,7 @@ import {
   type PluginHealthDiagnostics,
 } from "@paperclipai/plugin-sdk";
 import { COLORS, METRIC_NAMES, PLUGIN_ID, WEBHOOK_KEYS, ACP_PLUGIN_EVENT_PREFIX } from "./constants.js";
+import { paperclipFetch } from "./paperclip-fetch.js";
 import {
   postEmbed,
   postEmbedWithId,
@@ -226,7 +227,7 @@ const plugin = definePlugin({
       } else if (mapping.entityType === "issue") {
         // Route to issue comment
         try {
-          await ctx.http.fetch(
+          await paperclipFetch(
             `${baseUrl}/api/issues/${mapping.entityId}/comments`,
             {
               method: "POST",
