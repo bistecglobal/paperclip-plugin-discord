@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleInteraction, type CommandContext } from "../src/commands.js";
+import { resolveCompanyId, _resetCompanyIdCache } from "../src/company-resolver.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -211,7 +212,7 @@ describe("interaction error handling", () => {
 // ---------------------------------------------------------------------------
 
 describe("CommandContext fallback handling", () => {
-  it("uses cmdCtx.companyId when provided, not a hardcoded default", async () => {
+  it("uses cmdCtx.companyId when no pluginCtx is provided", async () => {
     const customId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     const ctx = makeCtx();
     const cmdCtx = makeCmdCtx({ companyId: customId });
@@ -219,5 +220,115 @@ describe("CommandContext fallback handling", () => {
     await handleInteraction(ctx, statusInteraction() as any, cmdCtx);
 
     expect(ctx.agents.list.mock.calls[0][0].companyId).toBe(customId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lazy company-ID resolution (the startup regression fix)
+// ---------------------------------------------------------------------------
+
+describe("lazy company-ID resolution", () => {
+  beforeEach(() => {
+    _resetCompanyIdCache();
+  });
+
+  it("resolveCompanyId returns the real UUID from ctx.companies.list", async () => {
+    const ctx = makeCtx();
+    const result = await resolveCompanyId(ctx as any);
+    expect(result).toBe(REAL_COMPANY_ID);
+    expect(ctx.companies.list).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolveCompanyId caches after first call", async () => {
+    const ctx = makeCtx();
+    const r1 = await resolveCompanyId(ctx as any);
+    const r2 = await resolveCompanyId(ctx as any);
+    expect(r1).toBe(REAL_COMPANY_ID);
+    expect(r2).toBe(REAL_COMPANY_ID);
+    expect(ctx.companies.list).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolveCompanyId falls back to 'default' when companies.list fails", async () => {
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockRejectedValue(new Error("API unavailable")),
+      },
+    });
+    const result = await resolveCompanyId(ctx as any);
+    expect(result).toBe("default");
+  });
+
+  it("resolveCompanyId falls back to 'default' when no companies exist", async () => {
+    const ctx = makeCtx({
+      companies: { list: vi.fn().mockResolvedValue([]) },
+    });
+    const result = await resolveCompanyId(ctx as any);
+    expect(result).toBe("default");
+  });
+
+  it("handleInteraction uses lazy resolver when pluginCtx is set", async () => {
+    _resetCompanyIdCache();
+    const ctx = makeCtx();
+    // cmdCtx with pluginCtx but companyId set to "default" (as setup would do)
+    const cmdCtx = makeCmdCtx({
+      companyId: "default",
+      pluginCtx: ctx as any,
+    });
+
+    await handleInteraction(ctx, statusInteraction() as any, cmdCtx);
+
+    // Should have resolved via companies.list, NOT used "default"
+    expect(ctx.companies.list).toHaveBeenCalledTimes(1);
+    expect(ctx.agents.list.mock.calls[0][0].companyId).toBe(REAL_COMPANY_ID);
+  });
+
+  it("command failure still returns a valid interaction response after lazy resolve", async () => {
+    _resetCompanyIdCache();
+    const ctx = makeCtx({
+      agents: { list: vi.fn().mockRejectedValue(new Error("backend down")) },
+    });
+    const cmdCtx = makeCmdCtx({
+      companyId: "default",
+      pluginCtx: ctx as any,
+    });
+
+    const result = await handleInteraction(ctx, statusInteraction() as any, cmdCtx);
+    expect(result).toBeDefined();
+    expect((result as any).type).toBe(4);
+    expect((result as any).data.content).toContain("Failed to fetch status");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Worker activation safety
+// ---------------------------------------------------------------------------
+
+describe("worker activation safety", () => {
+  beforeEach(() => {
+    _resetCompanyIdCache();
+  });
+
+  it("setup does not need to call companies.list — resolution is deferred", () => {
+    // This is a design-level assertion: the CommandContext interface accepts
+    // pluginCtx for lazy resolution instead of requiring a pre-resolved companyId.
+    const cmdCtx: CommandContext = {
+      baseUrl: "http://localhost:3100",
+      companyId: "default",
+      token: "tok",
+      defaultChannelId: "ch",
+      pluginCtx: makeCtx() as any,
+    };
+    expect(cmdCtx.companyId).toBe("default");
+    expect(cmdCtx.pluginCtx).toBeDefined();
+  });
+
+  it("_resetCompanyIdCache allows fresh resolution", async () => {
+    const ctx = makeCtx();
+    await resolveCompanyId(ctx as any);
+    expect(ctx.companies.list).toHaveBeenCalledTimes(1);
+
+    _resetCompanyIdCache();
+    await resolveCompanyId(ctx as any);
+    expect(ctx.companies.list).toHaveBeenCalledTimes(2);
   });
 });

@@ -3,6 +3,7 @@ import { type DiscordEmbed, respondToInteraction } from "./discord-api.js";
 import { COLORS, METRIC_NAMES } from "./constants.js";
 import { withRetry } from "./retry.js";
 import { handleHandoffButton, handleDiscussionButton, handleAcpCommand } from "./session-registry.js";
+import { resolveCompanyId } from "./company-resolver.js";
 import {
   type Workflow,
   type WorkflowStep,
@@ -37,6 +38,8 @@ export interface CommandContext {
   companyId: string;
   token: string;
   defaultChannelId: string;
+  /** PluginContext for lazy company-ID resolution at command time. */
+  pluginCtx?: PluginContext;
 }
 
 function getOption(
@@ -318,12 +321,17 @@ async function handleSlashCommand(
   member?: { user: { username: string } },
   cmdCtx?: CommandContext,
 ): Promise<unknown> {
+  // Lazy company-ID resolution: resolve on first command, not at startup.
+  const companyId = cmdCtx?.pluginCtx
+    ? await resolveCompanyId(cmdCtx.pluginCtx)
+    : (cmdCtx?.companyId ?? "default");
+
   if (data.name === "acp") {
     return handleAcpCommand(
       ctx,
       cmdCtx?.token ?? "",
       data,
-      cmdCtx?.companyId ?? "default",
+      companyId,
       cmdCtx?.defaultChannelId ?? "",
     );
   }
@@ -338,7 +346,6 @@ async function handleSlashCommand(
   }
 
   const subName = subcommand.name;
-  const companyId = cmdCtx?.companyId ?? "default";
   const baseUrl = cmdCtx?.baseUrl ?? "http://localhost:3100";
 
   switch (subName) {

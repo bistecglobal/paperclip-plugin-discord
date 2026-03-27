@@ -45,6 +45,8 @@ import { registerWatch, checkWatches } from "./proactive-suggestions.js";
 let _pluginCtx: PluginContext | null = null;
 let _cmdCtx: CommandContext | null = null;
 
+import { resolveCompanyId } from "./company-resolver.js";
+
 type DiscordConfig = {
   discordBotTokenRef: string;
   defaultGuildId: string;
@@ -136,26 +138,16 @@ const plugin = definePlugin({
     const baseUrl = config.paperclipBaseUrl || "http://localhost:3100";
     const retentionDays = config.intelligenceRetentionDays || 30;
 
-    // Resolve actual company ID from the Paperclip API instead of hardcoding "default".
-    let companyId: string;
-    try {
-      const companies = await ctx.companies.list({ limit: 1 });
-      if (companies.length > 0) {
-        companyId = companies[0].id;
-      } else {
-        ctx.logger.warn("No companies found via ctx.companies.list(), commands requiring companyId will fail");
-        companyId = "default";
-      }
-    } catch (err) {
-      ctx.logger.warn("Failed to resolve company ID, falling back to 'default'", { error: String(err) });
-      companyId = "default";
-    }
+    // Company ID is resolved lazily on first /clip command or job invocation,
+    // NOT during setup — startup-time API calls can cause worker activation to fail.
+    const companyId = "default"; // placeholder; jobs use resolveCompanyId(ctx) at runtime
 
     const cmdCtx: CommandContext = {
       baseUrl,
       companyId,
       token,
       defaultChannelId: config.defaultChannelId,
+      pluginCtx: ctx,
     };
 
     // Store context at module level so onWebhook() can reuse it.
@@ -815,7 +807,8 @@ const plugin = definePlugin({
       );
 
       ctx.jobs.register("check-watches", async () => {
-        await checkWatches(ctx, token, companyId, config.defaultChannelId);
+        const cid = await resolveCompanyId(ctx);
+        await checkWatches(ctx, token, cid, config.defaultChannelId);
       });
     }
 
@@ -1002,12 +995,13 @@ const plugin = definePlugin({
 
     if (config.enableIntelligence && config.intelligenceChannelIds.length > 0) {
       ctx.jobs.register("discord-intelligence-scan", async () => {
+        const cid = await resolveCompanyId(ctx);
         await runIntelligenceScan(
           ctx,
           token,
           config.defaultGuildId,
           config.intelligenceChannelIds,
-          companyId,
+          cid,
           retentionDays,
         );
       });
@@ -1019,27 +1013,35 @@ const plugin = definePlugin({
     // --- Backfill ---
 
     if (config.enableIntelligence && config.intelligenceChannelIds.length > 0) {
-      const existing = await ctx.state.get({
-        scopeKind: "company",
-        scopeId: companyId,
-        stateKey: "discord_intelligence",
-      }) as { backfillComplete?: boolean } | null;
+      // Backfill also deferred to avoid startup-time company resolution.
+      // It runs as an async task after setup completes.
+      const tryBackfill = async () => {
+        const cid = await resolveCompanyId(ctx);
+        const existing = await ctx.state.get({
+          scopeKind: "company",
+          scopeId: cid,
+          stateKey: "discord_intelligence",
+        }) as { backfillComplete?: boolean } | null;
 
-      if (!existing?.backfillComplete) {
-        ctx.logger.info("First install detected, starting historical backfill...");
-        await runBackfill(
-          ctx,
-          token,
-          config.defaultGuildId,
-          config.intelligenceChannelIds,
-          companyId,
-          config.backfillDays ?? 90,
-        );
-      }
+        if (!existing?.backfillComplete) {
+          ctx.logger.info("First install detected, starting historical backfill...");
+          await runBackfill(
+            ctx,
+            token,
+            config.defaultGuildId,
+            config.intelligenceChannelIds,
+            cid,
+            config.backfillDays ?? 90,
+          );
+        }
+      };
+      // Fire-and-forget so it doesn't block setup completion.
+      tryBackfill().catch((err) => ctx.logger.warn("Backfill failed", { error: String(err) }));
 
       ctx.actions.register("trigger-backfill", async () => {
+        const cid = await resolveCompanyId(ctx);
         await ctx.state.set(
-          { scopeKind: "company", scopeId: companyId, stateKey: "discord_intelligence" },
+          { scopeKind: "company", scopeId: cid, stateKey: "discord_intelligence" },
           { signals: [], backfillComplete: false },
         );
         const signals = await runBackfill(
@@ -1047,7 +1049,7 @@ const plugin = definePlugin({
           token,
           config.defaultGuildId,
           config.intelligenceChannelIds,
-          companyId,
+          cid,
           config.backfillDays ?? 90,
         );
         return { ok: true, signalsFound: signals.length };
