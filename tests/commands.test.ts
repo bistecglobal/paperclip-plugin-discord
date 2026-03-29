@@ -31,6 +31,9 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     issues: {
       list: vi.fn().mockResolvedValue([]),
     },
+    companies: {
+      list: vi.fn().mockResolvedValue([]),
+    },
     state: {
       get: vi.fn().mockResolvedValue(null),
       set: vi.fn().mockResolvedValue(undefined),
@@ -639,15 +642,407 @@ describe("unknown button clicks", () => {
   });
 });
 
+describe("/clip companies", () => {
+  it("lists available companies", async () => {
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockResolvedValue([
+          { id: "c1", name: "Acme Corp" },
+          { id: "c2", name: "Beta Inc" },
+        ]),
+      },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      { type: 2, data: { name: "clip", options: [{ name: "companies" }] } },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(4);
+    const embed = result.data.embeds[0];
+    expect(embed.title).toBe("Companies (2)");
+    expect(embed.description).toContain("Acme Corp");
+    expect(embed.description).toContain("Beta Inc");
+    expect(embed.description).toContain("c1");
+    expect(embed.description).toContain("c2");
+    expect(embed.color).toBe(COLORS.BLUE);
+  });
+
+  it("handles no companies found", async () => {
+    const ctx = makeCtx({
+      companies: { list: vi.fn().mockResolvedValue([]) },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      { type: 2, data: { name: "clip", options: [{ name: "companies" }] } },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.data.content).toContain("No companies found");
+  });
+
+  it("handles API error gracefully", async () => {
+    const ctx = makeCtx({
+      companies: { list: vi.fn().mockRejectedValue(new Error("API unreachable")) },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      { type: 2, data: { name: "clip", options: [{ name: "companies" }] } },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.data.content).toContain("Failed to fetch companies");
+    expect(result.data.content).toContain("API unreachable");
+  });
+});
+
+describe("/clip projects", () => {
+  it("lists projects for the default company", async () => {
+    mockPaperclipFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve([
+        { id: "p1", name: "Project Alpha", status: "in_progress" },
+        { id: "p2", name: "Project Beta", status: "completed" },
+      ]),
+    });
+
+    const ctx = makeCtx();
+    const result = await handleInteraction(
+      ctx,
+      { type: 2, data: { name: "clip", options: [{ name: "projects" }] } },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(4);
+    const embed = result.data.embeds[0];
+    expect(embed.title).toBe("Projects (2)");
+    expect(embed.description).toContain("Project Alpha");
+    expect(embed.description).toContain("Project Beta");
+    expect(embed.description).toContain("In Progress");
+    expect(mockPaperclipFetch).toHaveBeenCalledWith(
+      "http://localhost:3100/api/companies/default/projects",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("filters by company name", async () => {
+    mockPaperclipFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve([
+        { id: "p1", name: "My Project", status: "in_progress" },
+      ]),
+    });
+
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockResolvedValue([
+          { id: "c1", name: "Acme" },
+          { id: "c2", name: "Beta" },
+        ]),
+      },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 2,
+        data: { name: "clip", options: [{ name: "projects", options: [{ name: "company", value: "Acme" }] }] },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(4);
+    expect(result.data.embeds[0].title).toBe("Projects (Acme)");
+    expect(mockPaperclipFetch).toHaveBeenCalledWith(
+      "http://localhost:3100/api/companies/c1/projects",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("returns error for unknown company filter", async () => {
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockResolvedValue([
+          { id: "c1", name: "Acme" },
+        ]),
+      },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 2,
+        data: { name: "clip", options: [{ name: "projects", options: [{ name: "company", value: "Unknown" }] }] },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.data.content).toContain('Company "Unknown" not found');
+    expect(result.data.content).toContain("Acme");
+  });
+
+  it("handles no projects found", async () => {
+    mockPaperclipFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve([]),
+    });
+
+    const ctx = makeCtx();
+    const result = await handleInteraction(
+      ctx,
+      { type: 2, data: { name: "clip", options: [{ name: "projects" }] } },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.data.content).toContain("No projects found");
+  });
+
+  it("handles API error gracefully", async () => {
+    mockPaperclipFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      headers: new Headers(),
+      text: () => Promise.resolve("Internal Server Error"),
+    });
+
+    const ctx = makeCtx();
+    const result = await handleInteraction(
+      ctx,
+      { type: 2, data: { name: "clip", options: [{ name: "projects" }] } },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.data.content).toContain("Failed to fetch projects");
+  });
+});
+
+describe("/clip agents with company filter", () => {
+  it("filters agents by company", async () => {
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockResolvedValue([
+          { id: "c1", name: "Acme" },
+        ]),
+      },
+      agents: {
+        list: vi.fn().mockResolvedValue([
+          { id: "a1", name: "Engineer", status: "active", title: "Dev" },
+        ]),
+        sessions: { create: vi.fn(), sendMessage: vi.fn(), close: vi.fn() },
+        invoke: vi.fn(),
+      },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 2,
+        data: { name: "clip", options: [{ name: "agents", options: [{ name: "company", value: "Acme" }] }] },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(4);
+    expect(result.data.embeds[0].title).toBe("Agents (Acme)");
+    expect(result.data.embeds[0].description).toContain("Engineer");
+    expect(ctx.agents.list).toHaveBeenCalledWith({ companyId: "c1" });
+  });
+
+  it("returns error for unknown company", async () => {
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockResolvedValue([{ id: "c1", name: "Acme" }]),
+      },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 2,
+        data: { name: "clip", options: [{ name: "agents", options: [{ name: "company", value: "Nope" }] }] },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.data.content).toContain('Company "Nope" not found');
+  });
+});
+
+describe("autocomplete (interaction type 4)", () => {
+  it("returns company suggestions for company autocomplete", async () => {
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockResolvedValue([
+          { id: "c1", name: "Acme Corp" },
+          { id: "c2", name: "Beta Inc" },
+          { id: "c3", name: "Gamma LLC" },
+        ]),
+      },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 4,
+        data: {
+          name: "clip",
+          options: [{
+            name: "agents",
+            options: [{ name: "company", value: "ac", focused: true }],
+          }],
+        },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(8);
+    expect(result.data.choices).toHaveLength(1);
+    expect(result.data.choices[0].name).toBe("Acme Corp");
+  });
+
+  it("returns all companies when query is empty", async () => {
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockResolvedValue([
+          { id: "c1", name: "Acme" },
+          { id: "c2", name: "Beta" },
+        ]),
+      },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 4,
+        data: {
+          name: "clip",
+          options: [{
+            name: "projects",
+            options: [{ name: "company", value: "", focused: true }],
+          }],
+        },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(8);
+    expect(result.data.choices).toHaveLength(2);
+  });
+
+  it("returns project suggestions for project autocomplete", async () => {
+    mockPaperclipFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => Promise.resolve([
+        { id: "p1", name: "Frontend" },
+        { id: "p2", name: "Backend" },
+        { id: "p3", name: "Infra" },
+      ]),
+    });
+
+    const ctx = makeCtx();
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 4,
+        data: {
+          name: "clip",
+          options: [{
+            name: "issues",
+            options: [{ name: "project", value: "front", focused: true }],
+          }],
+        },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(8);
+    expect(result.data.choices).toHaveLength(1);
+    expect(result.data.choices[0].name).toBe("Frontend");
+  });
+
+  it("returns empty choices on error", async () => {
+    const ctx = makeCtx({
+      companies: {
+        list: vi.fn().mockRejectedValue(new Error("network error")),
+      },
+    });
+
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 4,
+        data: {
+          name: "clip",
+          options: [{
+            name: "agents",
+            options: [{ name: "company", value: "test", focused: true }],
+          }],
+        },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(8);
+    expect(result.data.choices).toHaveLength(0);
+  });
+
+  it("returns empty choices when no focused option", async () => {
+    const ctx = makeCtx();
+    const result = await handleInteraction(
+      ctx,
+      {
+        type: 4,
+        data: {
+          name: "clip",
+          options: [{
+            name: "agents",
+            options: [{ name: "company", value: "test" }],
+          }],
+        },
+      },
+      defaultCmdCtx,
+    ) as any;
+
+    expect(result.type).toBe(8);
+    expect(result.data.choices).toHaveLength(0);
+  });
+});
+
 describe("SLASH_COMMANDS", () => {
   it("defines clip and acp commands", () => {
     expect(SLASH_COMMANDS).toHaveLength(2);
     const clip = SLASH_COMMANDS[0]!;
     expect(clip.name).toBe("clip");
     const subNames = clip.options.map((o) => o.name);
-    expect(subNames).toEqual(["status", "approve", "budget", "issues", "agents", "help", "connect", "connect-channel", "digest", "commands"]);
+    expect(subNames).toEqual(["status", "approve", "budget", "issues", "agents", "companies", "projects", "help", "connect", "connect-channel", "digest", "commands"]);
 
     const acp = SLASH_COMMANDS[1]!;
     expect(acp.name).toBe("acp");
+  });
+
+  it("marks company options as autocomplete-enabled", () => {
+    const clip = SLASH_COMMANDS[0]!;
+    const agents = clip.options.find((o) => o.name === "agents")!;
+    const companyOpt = (agents as any).options?.find((o: any) => o.name === "company");
+    expect(companyOpt?.autocomplete).toBe(true);
+
+    const projects = clip.options.find((o) => o.name === "projects")!;
+    const projCompanyOpt = (projects as any).options?.find((o: any) => o.name === "company");
+    expect(projCompanyOpt?.autocomplete).toBe(true);
+
+    const issues = clip.options.find((o) => o.name === "issues")!;
+    const projectOpt = (issues as any).options?.find((o: any) => o.name === "project");
+    expect(projectOpt?.autocomplete).toBe(true);
   });
 });
