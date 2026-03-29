@@ -194,6 +194,31 @@ describe("job handler registration vs manifest", () => {
     );
   });
 
+  it("logs at debug level (not info) when digest mode is off", async () => {
+    const { ctx } = await runSetup({ digestMode: "off" });
+
+    // The info log should NOT contain "Daily digest job registered"
+    const infoMessages = ctx.logger.info.mock.calls.map((c: any[]) => c[0]);
+    expect(infoMessages).not.toContainEqual(
+      expect.stringContaining("Daily digest job registered"),
+    );
+
+    // Instead, the debug log should contain the registration message
+    expect(ctx.logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("Daily digest job registered"),
+      expect.objectContaining({ mode: "off" }),
+    );
+  });
+
+  it("logs at info level when digest mode is active", async () => {
+    const { ctx } = await runSetup({ digestMode: "daily" });
+
+    expect(ctx.logger.info).toHaveBeenCalledWith(
+      "Daily digest job registered",
+      expect.objectContaining({ mode: "daily" }),
+    );
+  });
+
   it("discord-intelligence-scan handler early-returns when intelligence disabled", async () => {
     const { registeredJobs, ctx } = await runSetup({
       enableIntelligence: false,

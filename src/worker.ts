@@ -892,7 +892,11 @@ const plugin = definePlugin({
       }
     });
 
-    ctx.logger.info("Daily digest job registered", { mode: effectiveDigestMode });
+    if (effectiveDigestMode === "off") {
+      ctx.logger.debug("Daily digest job registered (inactive)", { mode: effectiveDigestMode });
+    } else {
+      ctx.logger.info("Daily digest job registered", { mode: effectiveDigestMode });
+    }
 
     // --- Per-company channel overrides ---
 
