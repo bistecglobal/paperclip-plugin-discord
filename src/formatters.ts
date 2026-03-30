@@ -70,7 +70,7 @@ export function formatIssueCreated(event: PluginEvent, baseUrl?: string): Discor
 export function formatIssueDone(event: PluginEvent, baseUrl?: string): DiscordMessage {
   const p = event.payload as Payload;
   const identifier = String(p.identifier ?? event.entityId);
-  const title = String(p.title ?? "");
+  const title = String(p.title ?? "") || identifier;
   const status = p.status ? String(p.status) : null;
   const priority = p.priority ? String(p.priority) : null;
 

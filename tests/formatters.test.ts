@@ -70,6 +70,41 @@ describe("formatIssueDone", () => {
     expect(msg.embeds?.[0]?.color).toBe(COLORS.GREEN);
     expect(msg.embeds?.[0]?.description).toContain("done");
   });
+
+  it("shows issue title in completion description", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "PROJ-42", title: "Fix login bug" } }),
+    );
+    expect(msg.embeds?.[0]?.description).toBe("**Fix login bug** is now done.");
+  });
+
+  it("falls back to identifier when title is missing", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "PROJ-42" } }),
+    );
+    expect(msg.embeds?.[0]?.description).toBe("**PROJ-42** is now done.");
+  });
+
+  it("falls back to identifier when title is empty string", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "PROJ-42", title: "" } }),
+    );
+    expect(msg.embeds?.[0]?.description).toBe("**PROJ-42** is now done.");
+  });
+
+  it("falls back to identifier when title is null", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "PROJ-42", title: null } }),
+    );
+    expect(msg.embeds?.[0]?.description).toBe("**PROJ-42** is now done.");
+  });
+
+  it("falls back to entityId when both title and identifier are missing", () => {
+    const msg = formatIssueDone(
+      makeEvent({ entityId: "entity-abc" }),
+    );
+    expect(msg.embeds?.[0]?.description).toBe("**entity-abc** is now done.");
+  });
 });
 
 describe("formatApprovalCreated", () => {
