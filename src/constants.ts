@@ -73,6 +73,7 @@ export const METRIC_NAMES = {
   inboundRouted: "discord_inbound_routed",
   digestSent: "discord_digest_sent",
   workflowsExecuted: "discord_workflows_executed",
+  budgetWarningsSent: "discord_budget_warnings_sent",
 } as const;
 
 export const ROLE_WEIGHTS: Record<string, number> = {
@@ -93,6 +94,9 @@ export const BACKFILL_SIGNAL_CAP = 200;
 
 export const ESCALATION_TIMEOUT_MS = 30 * 60 * 1000;
 export const ESCALATION_CHECK_INTERVAL_CRON = "*/5 * * * *";
+
+export const BUDGET_ALERT_THRESHOLD = 0.8; // 80%
+export const BUDGET_CHECK_INTERVAL_CRON = "*/5 * * * *";
 
 export const MAX_AGENTS_PER_THREAD = 5;
 export const MAX_CONVERSATION_TURNS = 50;

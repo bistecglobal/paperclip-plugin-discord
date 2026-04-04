@@ -276,6 +276,13 @@ const manifest: PaperclipPluginManifestV1 = {
       schedule: "*/15 * * * *",
     },
     {
+      jobKey: "check-budget-thresholds",
+      displayName: "Budget Threshold Check",
+      description:
+        "Periodically check agent budgets and alert when crossing the 80% usage threshold.",
+      schedule: "*/5 * * * *",
+    },
+    {
       jobKey: "discord-daily-digest",
       displayName: "Discord Daily Digest",
       description:

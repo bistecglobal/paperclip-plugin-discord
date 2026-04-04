@@ -6,7 +6,7 @@ import {
   type PluginWebhookInput,
   type PluginHealthDiagnostics,
 } from "@paperclipai/plugin-sdk";
-import { COLORS, METRIC_NAMES, PLUGIN_ID, WEBHOOK_KEYS, ACP_PLUGIN_EVENT_PREFIX } from "./constants.js";
+import { COLORS, METRIC_NAMES, PLUGIN_ID, WEBHOOK_KEYS, ACP_PLUGIN_EVENT_PREFIX, BUDGET_ALERT_THRESHOLD } from "./constants.js";
 import { paperclipFetch } from "./paperclip-fetch.js";
 import {
   postEmbed,
@@ -22,6 +22,8 @@ import {
   formatIssueDone,
   formatApprovalCreated,
   formatAgentError,
+  formatSessionFailure,
+  formatBudgetWarning,
   formatAgentRunStarted,
   formatAgentRunFinished,
   humanizePriority,
@@ -358,7 +360,7 @@ const plugin = definePlugin({
 
     if (config.notifyOnAgentError) {
       ctx.events.on("agent.run.failed", (event: PluginEvent) =>
-        notify(event, formatAgentError, config.errorsChannelId),
+        notify(event, formatSessionFailure, config.errorsChannelId),
       );
     }
 
@@ -710,6 +712,74 @@ const plugin = definePlugin({
         });
 
         ctx.logger.info("Escalation timed out", { escalationId });
+      }
+    });
+
+    // ===================================================================
+    // Budget threshold check job
+    // ===================================================================
+
+    ctx.jobs.register("check-budget-thresholds", async () => {
+      const jobCompanyId = await resolveCompanyId(ctx);
+      const agents = await ctx.agents.list({ companyId: jobCompanyId });
+
+      for (const agent of agents) {
+        const a = agent as { id: string; name: string; status?: string };
+        if (a.status && a.status !== "active") continue;
+
+        const budgetState = await ctx.state.get({
+          scopeKind: "agent",
+          scopeId: a.id,
+          stateKey: "budget",
+        }) as { spent?: number; limit?: number } | null;
+
+        if (!budgetState?.limit || budgetState.limit <= 0) continue;
+
+        const spent = budgetState.spent ?? 0;
+        const limit = budgetState.limit;
+        const pct = spent / limit;
+
+        if (pct < BUDGET_ALERT_THRESHOLD) continue;
+
+        // Dedup: check if we already alerted for this billing cycle
+        const alertState = await ctx.state.get({
+          scopeKind: "agent",
+          scopeId: a.id,
+          stateKey: "budget-alert-last-sent",
+        }) as { limit?: number; sentAt?: string } | null;
+
+        // Only alert once per agent per billing cycle (identified by limit value)
+        if (alertState?.limit === limit) continue;
+
+        const remaining = limit - spent;
+        const pctRounded = Math.round(pct * 100);
+
+        const channelId = await resolveChannel(
+          ctx,
+          jobCompanyId,
+          config.errorsChannelId || config.defaultChannelId,
+        );
+        if (!channelId) continue;
+
+        const message = formatBudgetWarning({
+          agentName: a.name,
+          agentId: a.id,
+          spent,
+          limit,
+          remaining,
+          pct: pctRounded,
+        });
+
+        await postEmbed(ctx, token, channelId, message);
+
+        // Record that we sent the alert for this billing cycle
+        await ctx.state.set(
+          { scopeKind: "agent", scopeId: a.id, stateKey: "budget-alert-last-sent" },
+          { limit, sentAt: new Date().toISOString() },
+        );
+
+        await ctx.metrics.write(METRIC_NAMES.budgetWarningsSent, 1);
+        ctx.logger.info("Budget threshold alert sent", { agentId: a.id, agentName: a.name, pct: pctRounded });
       }
     });
 

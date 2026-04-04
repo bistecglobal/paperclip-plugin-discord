@@ -4,6 +4,9 @@ import {
   formatIssueDone,
   formatApprovalCreated,
   formatAgentError,
+  formatSessionFailure,
+  formatBudgetWarning,
+  type BudgetWarningData,
   formatAgentRunStarted,
   formatAgentRunFinished,
   humanizeStatus,
@@ -554,5 +557,210 @@ describe("formatIssueDone — actionability improvements", () => {
     const viewBtn = msg.components?.[0]?.components?.find((c) => c.label === "View Issue");
     expect(viewBtn).toBeDefined();
     expect(viewBtn?.url).toBe("http://localhost:3100/issues/iss-7");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatSessionFailure
+// ---------------------------------------------------------------------------
+
+describe("formatSessionFailure", () => {
+  it("produces a red embed with agent name in title", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Engineer", error: "Something broke" } }),
+    );
+    expect(msg.embeds?.[0]?.title).toBe("Session Failed: Engineer");
+    expect(msg.embeds?.[0]?.color).toBe(COLORS.RED);
+  });
+
+  it("classifies token limit errors", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "context length exceeded" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const errorType = fields.find((f) => f.name === "Error Type");
+    expect(errorType?.value).toContain("Session / Token Limit");
+  });
+
+  it("classifies max_tokens errors", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "max_tokens reached" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const errorType = fields.find((f) => f.name === "Error Type");
+    expect(errorType?.value).toContain("Session / Token Limit");
+  });
+
+  it("classifies budget exhausted errors", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "budget exhausted for agent" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const errorType = fields.find((f) => f.name === "Error Type");
+    expect(errorType?.value).toContain("Budget Exhausted");
+  });
+
+  it("classifies timeout errors", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "session timed out" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const errorType = fields.find((f) => f.name === "Error Type");
+    expect(errorType?.value).toContain("Timeout");
+  });
+
+  it("classifies deadline exceeded as timeout", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "deadline exceeded" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const errorType = fields.find((f) => f.name === "Error Type");
+    expect(errorType?.value).toContain("Timeout");
+  });
+
+  it("falls back to Unknown Error for unrecognized errors", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "segfault at 0x0000" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const errorType = fields.find((f) => f.name === "Error Type");
+    expect(errorType?.value).toContain("Unknown Error");
+  });
+
+  it("includes task identifier and title when present", () => {
+    const msg = formatSessionFailure(
+      makeEvent({
+        payload: {
+          agentName: "Bot",
+          error: "token limit",
+          issueIdentifier: "TUM-42",
+          issueTitle: "Fix the widget",
+        },
+      }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const task = fields.find((f) => f.name === "Task");
+    expect(task?.value).toContain("TUM-42");
+    expect(task?.value).toContain("Fix the widget");
+  });
+
+  it("includes last active timestamp as Discord relative time", () => {
+    const msg = formatSessionFailure(
+      makeEvent({
+        payload: {
+          agentName: "Bot",
+          error: "timeout",
+          lastActiveAt: "2026-04-04T11:55:00Z",
+        },
+      }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const lastActive = fields.find((f) => f.name === "Last Active");
+    expect(lastActive?.value).toMatch(/<t:\d+:R>/);
+  });
+
+  it("includes Next Steps field with actionable text", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "deadline exceeded" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const nextSteps = fields.find((f) => f.name === "Next Steps");
+    expect(nextSteps).toBeDefined();
+    expect(nextSteps!.value).toContain("/clip");
+  });
+
+  it("falls back to entityId when agentName is missing", () => {
+    const msg = formatSessionFailure(makeEvent({ entityId: "agent-xyz", payload: { error: "err" } }));
+    expect(msg.embeds?.[0]?.title).toBe("Session Failed: agent-xyz");
+  });
+
+  it("truncates long error messages to 1024 chars", () => {
+    const longError = "x".repeat(2000);
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: longError } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const errorField = fields.find((f) => f.name === "Error");
+    expect(errorField!.value.length).toBeLessThanOrEqual(1024);
+  });
+
+  it("omits Task field when no issue context", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "err" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    expect(fields.find((f) => f.name === "Task")).toBeUndefined();
+  });
+
+  it("omits Last Active field when not provided", () => {
+    const msg = formatSessionFailure(
+      makeEvent({ payload: { agentName: "Bot", error: "err" } }),
+    );
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    expect(fields.find((f) => f.name === "Last Active")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatBudgetWarning
+// ---------------------------------------------------------------------------
+
+describe("formatBudgetWarning", () => {
+  const baseData: BudgetWarningData = {
+    agentName: "Engineer",
+    agentId: "agent-1",
+    spent: 8.5,
+    limit: 10,
+    remaining: 1.5,
+    pct: 85,
+  };
+
+  it("produces a yellow embed with agent name in title", () => {
+    const msg = formatBudgetWarning(baseData);
+    expect(msg.embeds?.[0]?.title).toBe("Budget Warning: Engineer");
+    expect(msg.embeds?.[0]?.color).toBe(COLORS.YELLOW);
+  });
+
+  it("includes spent, limit, and remaining fields with dollar formatting", () => {
+    const msg = formatBudgetWarning(baseData);
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    expect(fields.find((f) => f.name === "Spent")?.value).toBe("$8.50");
+    expect(fields.find((f) => f.name === "Limit")?.value).toBe("$10.00");
+    expect(fields.find((f) => f.name === "Remaining")?.value).toBe("$1.50");
+  });
+
+  it("marks spent/limit/remaining fields as inline", () => {
+    const msg = formatBudgetWarning(baseData);
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    expect(fields.find((f) => f.name === "Spent")?.inline).toBe(true);
+    expect(fields.find((f) => f.name === "Limit")?.inline).toBe(true);
+    expect(fields.find((f) => f.name === "Remaining")?.inline).toBe(true);
+  });
+
+  it("includes next steps referencing /clip budget <agentName>", () => {
+    const msg = formatBudgetWarning(baseData);
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    const nextSteps = fields.find((f) => f.name === "Next Steps");
+    expect(nextSteps?.value).toContain("/clip budget Engineer");
+  });
+
+  it("shows percentage in description", () => {
+    const msg = formatBudgetWarning(baseData);
+    expect(msg.embeds?.[0]?.description).toContain("85%");
+  });
+
+  it("handles 100% budget usage", () => {
+    const data: BudgetWarningData = {
+      agentName: "OverBudget",
+      agentId: "agent-2",
+      spent: 10,
+      limit: 10,
+      remaining: 0,
+      pct: 100,
+    };
+    const msg = formatBudgetWarning(data);
+    expect(msg.embeds?.[0]?.description).toContain("100%");
+    const fields = msg.embeds?.[0]?.fields ?? [];
+    expect(fields.find((f) => f.name === "Remaining")?.value).toBe("$0.00");
   });
 });

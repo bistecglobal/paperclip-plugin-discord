@@ -274,6 +274,119 @@ export function formatAgentError(event: PluginEvent): DiscordMessage {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Session failure classification
+// ---------------------------------------------------------------------------
+
+const ERROR_CLASSIFICATIONS: Array<{
+  pattern: RegExp;
+  label: string;
+  nextSteps: string;
+}> = [
+  {
+    pattern: /token.?limit|context.?length|max.?tokens|context.?window/i,
+    label: "Session / Token Limit",
+    nextSteps: "The session hit its token limit. Use `/clip retry <task>` to restart with a fresh context, or break the task into smaller subtasks.",
+  },
+  {
+    pattern: /budget.?exhaust|budget.?exceed|insufficient.?budget|over.?budget/i,
+    label: "Budget Exhausted",
+    nextSteps: "The agent's budget has been fully consumed. Use `/clip budget <agent>` to check the current state and top up if needed.",
+  },
+  {
+    pattern: /timeout|timed?.?out|deadline.?exceed/i,
+    label: "Timeout",
+    nextSteps: "The session timed out before completing. Use `/clip retry <task>` to restart, or increase the timeout if applicable.",
+  },
+];
+
+function classifyError(errorMessage: string): { label: string; nextSteps: string } {
+  for (const cls of ERROR_CLASSIFICATIONS) {
+    if (cls.pattern.test(errorMessage)) {
+      return { label: cls.label, nextSteps: cls.nextSteps };
+    }
+  }
+  return {
+    label: "Unknown Error",
+    nextSteps: "Check the agent logs for details. Use `/clip status <agent>` to see the current agent state.",
+  };
+}
+
+export function formatSessionFailure(event: PluginEvent): DiscordMessage {
+  const p = event.payload as Payload;
+  const agentName = String(p.agentName ?? p.name ?? event.entityId);
+  const errorMessage = String(p.error ?? p.message ?? "Unknown error");
+  const taskIdentifier = p.issueIdentifier ? String(p.issueIdentifier) : null;
+  const taskTitle = p.issueTitle ? String(p.issueTitle) : null;
+  const lastActiveAt = p.lastActiveAt ? String(p.lastActiveAt) : null;
+
+  const classification = classifyError(errorMessage);
+
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
+
+  if (taskIdentifier) {
+    const taskLine = taskTitle
+      ? `**${taskIdentifier}** — ${taskTitle}`
+      : `**${taskIdentifier}**`;
+    fields.push({ name: "Task", value: taskLine, inline: true });
+  }
+
+  fields.push({ name: "Error Type", value: `\`${classification.label}\``, inline: true });
+
+  if (lastActiveAt) {
+    const ts = Math.floor(new Date(lastActiveAt).getTime() / 1000);
+    fields.push({ name: "Last Active", value: `<t:${ts}:R>`, inline: true });
+  }
+
+  fields.push({ name: "Error", value: errorMessage.slice(0, 1024) });
+  fields.push({ name: "Next Steps", value: classification.nextSteps });
+
+  return {
+    embeds: [
+      {
+        title: `Session Failed: ${agentName}`,
+        description: `**${agentName}** session ended with an error`,
+        color: COLORS.RED,
+        fields,
+        footer: { text: "Paperclip" },
+        timestamp: event.occurredAt,
+      },
+    ],
+  };
+}
+
+export interface BudgetWarningData {
+  agentName: string;
+  agentId: string;
+  spent: number;
+  limit: number;
+  remaining: number;
+  pct: number;
+}
+
+export function formatBudgetWarning(data: BudgetWarningData): DiscordMessage {
+  return {
+    embeds: [
+      {
+        title: `Budget Warning: ${data.agentName}`,
+        description: `**${data.agentName}** has used **${data.pct}%** of its budget`,
+        color: COLORS.YELLOW,
+        fields: [
+          { name: "Spent", value: `$${data.spent.toFixed(2)}`, inline: true },
+          { name: "Limit", value: `$${data.limit.toFixed(2)}`, inline: true },
+          { name: "Remaining", value: `$${data.remaining.toFixed(2)}`, inline: true },
+          {
+            name: "Next Steps",
+            value: `Use \`/clip budget ${data.agentName}\` to check live budget status.`,
+          },
+        ],
+        footer: { text: "Paperclip" },
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+}
+
 export function formatAgentRunStarted(event: PluginEvent): DiscordMessage {
   const p = event.payload as Payload;
   const agentName = String(p.agentName ?? event.entityId);
