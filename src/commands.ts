@@ -35,6 +35,7 @@ interface Interaction {
   type: number;
   data?: InteractionData;
   member?: { user: { username: string } };
+  channel_id?: string;
 }
 
 export interface CommandContext {
@@ -334,7 +335,7 @@ export async function handleInteraction(
 
   if (interaction.type === 2 && interaction.data) {
     await ctx.metrics.write(METRIC_NAMES.commandsHandled, 1);
-    return handleSlashCommand(ctx, interaction.data, interaction.member, cmdCtx);
+    return handleSlashCommand(ctx, interaction.data, interaction.member, cmdCtx, interaction.channel_id);
   }
 
   if (interaction.type === 3 && interaction.data) {
@@ -357,6 +358,7 @@ async function handleSlashCommand(
   data: InteractionData,
   member?: { user: { username: string } },
   cmdCtx?: CommandContext,
+  interactionChannelId?: string,
 ): Promise<unknown> {
   // Lazy company-ID resolution: resolve on first command, not at startup.
   const companyId = cmdCtx?.pluginCtx
@@ -410,7 +412,7 @@ async function handleSlashCommand(
     case "connect":
       return handleConnect(ctx, getOption(subcommand.options ?? [], "company"));
     case "connect-channel":
-      return handleConnectChannel(ctx, getOption(subcommand.options ?? [], "project") ?? "");
+      return handleConnectChannel(ctx, getOption(subcommand.options ?? [], "project") ?? "", interactionChannelId);
     case "digest":
       return handleDigest(
         ctx,
@@ -1022,11 +1024,20 @@ async function handleConnect(
 async function handleConnectChannel(
   ctx: PluginContext,
   projectName: string,
+  channelId?: string,
 ): Promise<unknown> {
   if (!projectName.trim()) {
     return respondToInteraction({
       type: 4,
       content: "Usage: `/clip connect-channel project:<project-name>`",
+      ephemeral: true,
+    });
+  }
+
+  if (!channelId) {
+    return respondToInteraction({
+      type: 4,
+      content: "Could not determine the current channel. Please run this command in the channel you want to map.",
       ephemeral: true,
     });
   }
@@ -1038,9 +1049,7 @@ async function handleConnectChannel(
     })) as Record<string, string> | null;
 
     const channelMap = existing ?? {};
-    // Store project → channelId mapping (channelId will be resolved at notification time)
-    // For now we store the project name as key with a placeholder
-    channelMap[projectName.trim()] = "pending";
+    channelMap[projectName.trim()] = channelId;
 
     await ctx.state.set(
       { scopeKind: "instance", stateKey: "channel-project-map" },

@@ -48,11 +48,12 @@ const defaultCmdCtx: CommandContext = {
   defaultChannelId: "ch-1",
 };
 
-function clipInteraction(subName: string, options?: Array<{ name: string; value?: string | number }>) {
+function clipInteraction(subName: string, options?: Array<{ name: string; value?: string | number }>, channelId?: string) {
   return {
     type: 2,
     data: { name: "clip", options: [{ name: subName, options: options ?? [] }] },
     member: { user: { username: "testuser" } },
+    channel_id: channelId,
   };
 }
 
@@ -278,11 +279,11 @@ describe("/clip connect", () => {
 // ---------------------------------------------------------------------------
 
 describe("/clip connect-channel", () => {
-  it("maps project to channel", async () => {
+  it("maps project to the interaction channel", async () => {
     const ctx = makeCtx();
     const result = (await handleInteraction(
       ctx,
-      clipInteraction("connect-channel", [{ name: "project", value: "my-project" }]),
+      clipInteraction("connect-channel", [{ name: "project", value: "my-project" }], "ch-topic-123"),
       defaultCmdCtx,
     )) as any;
 
@@ -290,15 +291,26 @@ describe("/clip connect-channel", () => {
     expect(result.data.embeds[0].description).toContain("my-project");
     expect(ctx.state.set).toHaveBeenCalledWith(
       expect.objectContaining({ stateKey: "channel-project-map" }),
-      expect.objectContaining({ "my-project": "pending" }),
+      expect.objectContaining({ "my-project": "ch-topic-123" }),
     );
+  });
+
+  it("returns error when channel_id is missing", async () => {
+    const ctx = makeCtx();
+    const result = (await handleInteraction(
+      ctx,
+      clipInteraction("connect-channel", [{ name: "project", value: "my-project" }]),
+      defaultCmdCtx,
+    )) as any;
+
+    expect(result.data.content).toContain("Could not determine the current channel");
   });
 
   it("returns usage when project name is empty", async () => {
     const ctx = makeCtx();
     const result = (await handleInteraction(
       ctx,
-      clipInteraction("connect-channel", [{ name: "project", value: "" }]),
+      clipInteraction("connect-channel", [{ name: "project", value: "" }], "ch-123"),
       defaultCmdCtx,
     )) as any;
     expect(result.data.content).toContain("Usage");

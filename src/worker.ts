@@ -299,6 +299,20 @@ const plugin = definePlugin({
 
     // --- Event subscriptions ---
 
+    const resolveTopicChannel = async (event: PluginEvent): Promise<string | null> => {
+      if (!config.topicRouting) return null;
+      const payload = event.payload as Record<string, unknown>;
+      const projectName = payload.projectName ? String(payload.projectName) : null;
+      if (!projectName) return null;
+
+      const channelMap = (await ctx.state.get({
+        scopeKind: "instance",
+        stateKey: "channel-project-map",
+      })) as Record<string, string> | null;
+
+      return channelMap?.[projectName] ?? null;
+    };
+
     const notify = async (
       event: PluginEvent,
       formatter: (e: PluginEvent, baseUrl?: string) => ReturnType<typeof formatIssueCreated>,
@@ -309,7 +323,8 @@ const plugin = definePlugin({
         return;
       }
 
-      const channelId = await resolveChannel(ctx, event.companyId, overrideChannelId || config.defaultChannelId);
+      const topicChannel = overrideChannelId ? null : await resolveTopicChannel(event);
+      const channelId = await resolveChannel(ctx, event.companyId, topicChannel || overrideChannelId || config.defaultChannelId);
       if (!channelId) return;
 
       const message = formatter(event, baseUrl);
