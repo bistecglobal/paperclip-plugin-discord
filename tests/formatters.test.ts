@@ -558,6 +558,56 @@ describe("formatIssueDone — actionability improvements", () => {
     expect(viewBtn).toBeDefined();
     expect(viewBtn?.url).toBe("http://localhost:3100/issues/iss-7");
   });
+
+  it("falls back to executorName when assigneeName is missing", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "X-8", title: "T", executorName: "QA Bot" } }),
+    );
+    const field = msg.embeds?.[0]?.fields?.find((f) => f.name === "Completed by");
+    expect(field?.value).toBe("QA Bot");
+  });
+
+  it("falls back to agentName when assigneeName and executorName are missing", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "X-9", title: "T", agentName: "Deploy Agent" } }),
+    );
+    const field = msg.embeds?.[0]?.fields?.find((f) => f.name === "Completed by");
+    expect(field?.value).toBe("Deploy Agent");
+  });
+
+  it("falls back to assigneeAgentId when all name fields are missing", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "X-10", title: "T", assigneeAgentId: "agent-uuid-123" } }),
+    );
+    const field = msg.embeds?.[0]?.fields?.find((f) => f.name === "Completed by");
+    expect(field?.value).toBe("agent-uuid-123");
+  });
+
+  it("shows 'Unknown' when no completing agent info is available", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "X-11", title: "T" } }),
+    );
+    const field = msg.embeds?.[0]?.fields?.find((f) => f.name === "Completed by");
+    expect(field).toBeDefined();
+    expect(field?.value).toBe("Unknown");
+  });
+
+  it("always includes Summary field even when lastComment is missing", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "X-12", title: "T" } }),
+    );
+    const field = msg.embeds?.[0]?.fields?.find((f) => f.name === "Summary");
+    expect(field).toBeDefined();
+    expect(field?.value).toBe("No summary available");
+  });
+
+  it("prefers assigneeName over executorName", () => {
+    const msg = formatIssueDone(
+      makeEvent({ payload: { identifier: "X-13", title: "T", assigneeName: "Engineer", executorName: "Other" } }),
+    );
+    const field = msg.embeds?.[0]?.fields?.find((f) => f.name === "Completed by");
+    expect(field?.value).toBe("Engineer");
+  });
 });
 
 // ---------------------------------------------------------------------------

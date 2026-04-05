@@ -125,16 +125,21 @@ export function formatIssueDone(event: PluginEvent, baseUrl?: string): DiscordMe
   const status = p.status ? String(p.status) : null;
   const priority = p.priority ? String(p.priority) : null;
   const assigneeName = p.assigneeName ? String(p.assigneeName) : null;
+  const executorName = p.executorName ? String(p.executorName) : null;
+  const agentName = p.agentName ? String(p.agentName) : null;
+  const assigneeAgentId = p.assigneeAgentId ? String(p.assigneeAgentId) : null;
+  const completedBy = assigneeName || executorName || agentName || assigneeAgentId || "Unknown";
   const lastComment = p.lastComment ? String(p.lastComment) : null;
+  const summary = lastComment ? lastComment.slice(0, 200) : "No summary available";
   const parentIdentifier = p.parentIdentifier ? String(p.parentIdentifier) : null;
   const parentTitle = p.parentTitle ? String(p.parentTitle) : null;
   const parentId = p.parentId ? String(p.parentId) : null;
 
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
-  if (assigneeName) fields.push({ name: "Completed by", value: assigneeName, inline: true });
+  fields.push({ name: "Completed by", value: completedBy, inline: true });
   if (status) fields.push({ name: "Status", value: `\`${humanizeStatus(status)}\``, inline: true });
   if (priority) fields.push({ name: "Priority", value: `\`${humanizePriority(priority)}\``, inline: true });
-  if (lastComment) fields.push({ name: "Summary", value: lastComment.slice(0, 200) });
+  fields.push({ name: "Summary", value: summary });
   if (parentIdentifier) {
     const parentLine = parentTitle
       ? `**${parentIdentifier}** — ${parentTitle}`
