@@ -61,6 +61,7 @@ import {
 
 type DiscordConfig = {
   discordBotTokenRef: string;
+  paperclipBoardApiKeyRef?: string;
   defaultGuildId: string;
   defaultChannelId: string;
   approvalsChannelId: string;
@@ -269,6 +270,9 @@ const plugin = definePlugin({
     }
 
     const token = await ctx.secrets.resolve(config.discordBotTokenRef);
+    const paperclipBoardApiKey = config.paperclipBoardApiKeyRef
+      ? await ctx.secrets.resolve(config.paperclipBoardApiKeyRef)
+      : "";
     const baseUrl = config.paperclipBaseUrl || "http://localhost:3100";
     const retentionDays = config.intelligenceRetentionDays || 30;
     const defaultGuildId = normalizeDiscordId(config.defaultGuildId);
@@ -287,6 +291,7 @@ const plugin = definePlugin({
       baseUrl,
       companyId,
       token,
+      paperclipBoardApiKey,
       defaultChannelId,
       pluginCtx: ctx,
     };
@@ -386,6 +391,7 @@ const plugin = definePlugin({
                 authorUserId: `discord:${message.author.username}`,
               }),
             },
+            paperclipBoardApiKey,
           );
           await ctx.metrics.write(METRIC_NAMES.inboundRouted, 1);
           ctx.logger.info("Routed Discord reply to issue comment", {

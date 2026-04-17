@@ -58,6 +58,7 @@ const defaultCmdCtx: CommandContext = {
   baseUrl: "http://localhost:3100",
   companyId: "default",
   token: "test-token",
+  paperclipBoardApiKey: "test-board-key",
   defaultChannelId: "ch-1",
 };
 
@@ -235,6 +236,7 @@ describe("/clip approve", () => {
     expect(mockPaperclipFetch).toHaveBeenCalledWith(
       "https://app.example.com/api/approvals/apr-1/approve",
       expect.objectContaining({ method: "POST" }),
+      expect.any(String),
     );
     expect(result.data.embeds[0].color).toBe(COLORS.GREEN);
   });
@@ -333,6 +335,7 @@ describe("button clicks", () => {
     expect(mockPaperclipFetch).toHaveBeenCalledWith(
       "https://app.example.com/api/approvals/apr-1/approve",
       expect.objectContaining({ method: "POST" }),
+      expect.any(String),
     );
     expect(result.type).toBe(7);
     expect(result.data.embeds[0].description).toContain("Approved");
@@ -354,6 +357,7 @@ describe("button clicks", () => {
     expect(mockPaperclipFetch).toHaveBeenCalledWith(
       "https://app.example.com/api/approvals/apr-2/reject",
       expect.objectContaining({ method: "POST" }),
+      expect.any(String),
     );
     expect(result.type).toBe(7);
     expect(result.data.embeds[0].description).toContain("Rejected");

@@ -41,7 +41,13 @@ interface Interaction {
 export interface CommandContext {
   baseUrl: string;
   companyId: string;
+  /** Discord bot token — used for Discord API calls. */
   token: string;
+  /** Optional Paperclip board API key — attached to Paperclip API calls that
+   * require board authentication (approve/reject, create issues, etc.).
+   * Empty string disables the Authorization header, which is correct for
+   * `local_trusted` deployments. */
+  paperclipBoardApiKey?: string;
   defaultChannelId: string;
   /** PluginContext for lazy company-ID resolution at command time. */
   pluginCtx?: PluginContext;
@@ -396,6 +402,7 @@ async function handleSlashCommand(
         getOption(subcommand.options ?? [], "id"),
         member?.user.username,
         baseUrl,
+        cmdCtx?.paperclipBoardApiKey,
       );
     case "budget":
       return handleBudget(ctx, getOption(subcommand.options ?? [], "agent"), companyId);
@@ -552,6 +559,7 @@ async function handleApprove(
   approvalId: string | undefined,
   username?: string,
   baseUrl?: string,
+  apiKey?: string,
 ): Promise<unknown> {
   if (!approvalId) {
     return respondToInteraction({
@@ -568,7 +576,7 @@ async function handleApprove(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decidedByUserId: `discord:${username ?? "unknown"}` }),
-      });
+      }, apiKey);
       throwOnRetryableStatus(r);
       return r;
     });
@@ -1144,6 +1152,7 @@ async function handleButtonClick(
   const actor = username ?? "Discord user";
   const base = cmdCtx?.baseUrl ?? "http://localhost:3100";
   const token = cmdCtx?.token ?? "";
+  const apiKey = cmdCtx?.paperclipBoardApiKey ?? "";
 
   if (customId.startsWith("approval_approve_")) {
     const approvalId = customId.replace("approval_approve_", "");
@@ -1155,7 +1164,7 @@ async function handleButtonClick(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ decidedByUserId: `discord:${actor}` }),
-        });
+        }, apiKey);
         throwOnRetryableStatus(r);
         return r;
       });
@@ -1206,7 +1215,7 @@ async function handleButtonClick(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ decidedByUserId: `discord:${actor}` }),
-        });
+        }, apiKey);
         throwOnRetryableStatus(r);
         return r;
       });
@@ -1537,6 +1546,7 @@ async function handleCommands(
         channelId,
         getOption(sub.options ?? [], "name") ?? "",
         getOption(sub.options ?? [], "args") ?? "",
+        cmdCtx?.paperclipBoardApiKey ?? "",
       );
     case "delete":
       return handleCommandsDelete(ctx, companyId, getOption(sub.options ?? [], "name") ?? "");
@@ -1666,6 +1676,7 @@ async function handleCommandsRun(
   channelId: string,
   name: string,
   args: string,
+  paperclipBoardApiKey: string,
 ): Promise<unknown> {
   if (!name.trim()) {
     return respondToInteraction({
@@ -1694,6 +1705,7 @@ async function handleCommandsRun(
     channelId,
     companyId,
     baseUrl,
+    paperclipBoardApiKey,
     workflow,
     args,
   });
@@ -1806,6 +1818,7 @@ async function handleWorkflowApprovalButton(
     baseUrl,
     approvalId,
     approved,
+    cmdCtx?.paperclipBoardApiKey ?? "",
   );
 
   const statusText = approved ? "Approved" : "Rejected";

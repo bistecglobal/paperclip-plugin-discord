@@ -55,6 +55,14 @@ const manifest: PaperclipPluginManifestV1 = {
           "Secret UUID for your Discord Bot token. Create the secret in Settings → Secrets, then paste its UUID here.",
         default: DEFAULT_CONFIG.discordBotTokenRef,
       },
+      paperclipBoardApiKeyRef: {
+        type: "string",
+        format: "secret-ref",
+        title: "Paperclip Board API Key (secret reference)",
+        description:
+          "Optional. Secret UUID for a Paperclip board API key. Required when Paperclip is deployed in `authenticated` mode so that plugin-originated calls (approve/reject buttons, workflow steps, inbound reply routing) can satisfy server-side board-auth checks. Create a board API key in Settings → API Keys, store it as a secret, then paste the secret UUID here. Leave blank for `local_trusted` deployments.",
+        default: DEFAULT_CONFIG.paperclipBoardApiKeyRef,
+      },
       defaultGuildId: {
         type: "string",
         title: "Default Guild (Server) ID",

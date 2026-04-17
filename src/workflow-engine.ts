@@ -121,6 +121,7 @@ async function execFetchIssue(
   step: WorkflowStep,
   wfCtx: WorkflowContext,
   baseUrl: string,
+  apiKey: string,
 ): Promise<StepResult> {
   const issueId = interpolate(step.issueId ?? "", wfCtx);
   if (!issueId) return { ok: false, error: "Missing issueId" };
@@ -129,7 +130,7 @@ async function execFetchIssue(
     const resp = await paperclipFetch(`${baseUrl}/api/issues/${issueId}`, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
-    });
+    }, apiKey);
     if (!resp.ok) return { ok: false, error: `API ${resp.status}` };
     const data = await resp.json();
     return { ok: true, result: data };
@@ -232,6 +233,7 @@ async function execCreateIssue(
   wfCtx: WorkflowContext,
   companyId: string,
   baseUrl: string,
+  apiKey: string,
 ): Promise<StepResult> {
   const title = interpolate(step.title ?? "", wfCtx);
   if (!title) return { ok: false, error: "Missing title" };
@@ -250,7 +252,7 @@ async function execCreateIssue(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }, apiKey);
     if (!resp.ok) return { ok: false, error: `API ${resp.status}` };
     const data = await resp.json();
     return { ok: true, result: data };
@@ -355,6 +357,9 @@ export interface WorkflowRunOptions {
   channelId: string;
   companyId: string;
   baseUrl: string;
+  /** Paperclip board API key. Empty string disables Authorization header
+   * (correct for `local_trusted` deployments). Required for `authenticated`. */
+  paperclipBoardApiKey: string;
   workflow: Workflow;
   args: string;
   /** Resume from this step index (for approval continuation) */
@@ -369,7 +374,7 @@ export async function runWorkflow(opts: WorkflowRunOptions): Promise<{
   suspended?: boolean;
   error?: string;
 }> {
-  const { ctx, token, channelId, companyId, baseUrl, workflow, args } = opts;
+  const { ctx, token, channelId, companyId, baseUrl, paperclipBoardApiKey, workflow, args } = opts;
 
   const wfCtx: WorkflowContext = opts.resumeCtx
     ? { ...opts.resumeCtx, prevResult: null }
@@ -389,7 +394,7 @@ export async function runWorkflow(opts: WorkflowRunOptions): Promise<{
 
     switch (step.type) {
       case "fetch_issue":
-        result = await execFetchIssue(ctx, step, wfCtx, baseUrl);
+        result = await execFetchIssue(ctx, step, wfCtx, baseUrl, paperclipBoardApiKey);
         break;
       case "invoke_agent":
         result = await execInvokeAgent(ctx, step, wfCtx, companyId);
@@ -401,7 +406,7 @@ export async function runWorkflow(opts: WorkflowRunOptions): Promise<{
         result = await execSendMessage(ctx, step, wfCtx, token, channelId);
         break;
       case "create_issue":
-        result = await execCreateIssue(ctx, step, wfCtx, companyId, baseUrl);
+        result = await execCreateIssue(ctx, step, wfCtx, companyId, baseUrl, paperclipBoardApiKey);
         break;
       case "wait_approval":
         result = await execWaitApproval(ctx, step, wfCtx, token, channelId, workflow.name, i, companyId);
@@ -481,6 +486,7 @@ export async function resumeWorkflowAfterApproval(
   baseUrl: string,
   approvalId: string,
   approved: boolean,
+  paperclipBoardApiKey: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const pending = (await ctx.state.get({
     scopeKind: "company",
@@ -527,6 +533,7 @@ export async function resumeWorkflowAfterApproval(
     channelId,
     companyId,
     baseUrl,
+    paperclipBoardApiKey,
     workflow,
     args: pending.wfCtx.fullArgs,
     resumeFromStep: pending.stepIndex + 1,

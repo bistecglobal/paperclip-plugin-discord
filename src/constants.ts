@@ -1,5 +1,5 @@
 export const PLUGIN_ID = "paperclip-plugin-discord";
-export const PLUGIN_VERSION = "0.7.2";
+export const PLUGIN_VERSION = "0.7.3";
 
 export const WEBHOOK_KEYS = {
   discordInteractions: "discord-interactions",
@@ -15,6 +15,7 @@ export const EXPORT_NAMES = {
 
 export const DEFAULT_CONFIG = {
   discordBotTokenRef: "",
+  paperclipBoardApiKeyRef: "",
   defaultGuildId: "",
   defaultChannelId: "",
   approvalsChannelId: "",

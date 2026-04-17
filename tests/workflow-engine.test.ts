@@ -63,6 +63,7 @@ const baseOpts = {
   channelId: "ch-1",
   companyId: "company-1",
   baseUrl: "http://localhost:3100",
+  paperclipBoardApiKey: "",
   args: "",
 };
 
@@ -90,6 +91,7 @@ describe("runWorkflow — template interpolation", () => {
     expect(mockPaperclipFetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/issues/my-issue-id"),
       expect.anything(),
+      expect.any(String),
     );
   });
 
@@ -284,6 +286,7 @@ describe("runWorkflow — step types", () => {
         method: "POST",
         body: expect.stringContaining("Bug: login-broken"),
       }),
+      expect.any(String),
     );
   });
 
