@@ -353,6 +353,7 @@ const plugin = definePlugin({
       paperclipBoardApiKey,
       defaultChannelId,
       pluginCtx: ctx,
+      config: config as unknown as Record<string, unknown>,
     };
 
     // Store context at module level so onWebhook() can reuse it.

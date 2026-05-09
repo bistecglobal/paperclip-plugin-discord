@@ -76,6 +76,13 @@ const manifest: PaperclipPluginManifestV1 = {
           "Discord category channel ID. When set, the create_channel tool with useCategoryFromConfig=true creates per-project channels under this category. Used by companies that programmatically provision channels per project (e.g. SpecPaper).",
         default: "",
       },
+      enableSpecPaperCommands: {
+        type: "boolean",
+        title: "Enable SpecPaper /clip subcommands",
+        description:
+          "Expose /clip propose | brainstorm | plan | build | verify | archive | principle-override. These are convenience wrappers that file Paperclip issues with the right title prefix and assignee for SpecPaper-style companies (CTO / verifier / CEO). Disable to hide them from Discord even if the slash commands are registered.",
+        default: false,
+      },
       defaultChannelId: {
         type: "string",
         title: "Default Channel ID",
