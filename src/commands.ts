@@ -51,6 +51,8 @@ export interface CommandContext {
   defaultChannelId: string;
   /** PluginContext for lazy company-ID resolution at command time. */
   pluginCtx?: PluginContext;
+  /** Snapshot of plugin config used to gate command behavior. */
+  config?: Record<string, unknown>;
 }
 
 function getOption(
@@ -203,6 +205,71 @@ export const SLASH_COMMANDS = [
               { name: "tridaily", value: "tridaily" },
             ],
           },
+        ],
+      },
+      {
+        name: "propose",
+        description: "SpecPaper: file a proposal for a change",
+        type: 1,
+        options: [
+          { name: "idea", description: "One-line description of the proposed change", type: 3, required: true },
+          { name: "project", description: "Project name (defaults to channel-mapped project)", type: 3, required: false },
+        ],
+      },
+      {
+        name: "brainstorm",
+        description: "SpecPaper: run a brainstorm session for a change",
+        type: 1,
+        options: [
+          { name: "change", description: "Change slug", type: 3, required: true },
+          { name: "technique", description: "Optional brain-methods technique name", type: 3, required: false },
+          { name: "project", description: "Project name (defaults to channel-mapped project)", type: 3, required: false },
+        ],
+      },
+      {
+        name: "plan",
+        description: "SpecPaper: generate spec / design / tasks for a change",
+        type: 1,
+        options: [
+          { name: "change", description: "Change slug", type: 3, required: true },
+          { name: "project", description: "Project name (defaults to channel-mapped project)", type: 3, required: false },
+        ],
+      },
+      {
+        name: "build",
+        description: "SpecPaper: start the wave-based build for a change",
+        type: 1,
+        options: [
+          { name: "change", description: "Change slug", type: 3, required: true },
+          { name: "project", description: "Project name (defaults to channel-mapped project)", type: 3, required: false },
+        ],
+      },
+      {
+        name: "verify",
+        description: "SpecPaper: run static + dynamic audits for a change",
+        type: 1,
+        options: [
+          { name: "change", description: "Change slug", type: 3, required: true },
+          { name: "project", description: "Project name (defaults to channel-mapped project)", type: 3, required: false },
+        ],
+      },
+      {
+        name: "archive",
+        description: "SpecPaper: archive a completed change",
+        type: 1,
+        options: [
+          { name: "change", description: "Change slug", type: 3, required: true },
+          { name: "project", description: "Project name (defaults to channel-mapped project)", type: 3, required: false },
+        ],
+      },
+      {
+        name: "principle-override",
+        description: "SpecPaper: request a CEO override of a default principle",
+        type: 1,
+        options: [
+          { name: "principle", description: "Principle id (e.g. prefer-oss)", type: 3, required: true },
+          { name: "rationale", description: "Why we are overriding for this project / change", type: 3, required: true },
+          { name: "project", description: "Project name (defaults to channel-mapped project)", type: 3, required: false },
         ],
       },
       {
@@ -428,6 +495,14 @@ async function handleSlashCommand(
       );
     case "commands":
       return handleCommands(ctx, subcommand, cmdCtx);
+    case "propose":
+    case "brainstorm":
+    case "plan":
+    case "build":
+    case "verify":
+    case "archive":
+    case "principle-override":
+      return handleSpecPaperCommand(ctx, subName, subcommand, cmdCtx, interactionChannelId, companyId);
     default:
       return respondToInteraction({
         type: 4,
@@ -1063,6 +1138,269 @@ async function handleConnectChannel(
     return respondToInteraction({
       type: 4,
       content: `Failed to map channel: ${error instanceof Error ? error.message : String(error)}`,
+      ephemeral: true,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SpecPaper subcommands
+//
+// These are convenience wrappers that file Paperclip issues with the right
+// shape for the SpecPaper company's agents (CTO / verifier / CEO). They are
+// gated by `enableSpecPaperCommands` config (default false) but always
+// registered with Discord — handlers cleanly refuse if the flag is off.
+//
+// Each command:
+//   1. Resolves the target project — preferring the explicit `project:` arg,
+//      then falling back to `channel-project-map` for the current channel.
+//   2. Looks up the routing agent by name (CTO, Verifier, CEO).
+//   3. POSTs a new issue to /api/companies/{cid}/issues with title that
+//      surfaces the action (`!propose <idea>`, `!plan <change>`, …) so
+//      agents that already grep for those markers stay happy.
+//   4. Replies to the interaction with a small embed pointing at the issue.
+// ---------------------------------------------------------------------------
+
+const SPECPAPER_AGENT_BY_COMMAND: Record<string, string> = {
+  propose: "CTO",
+  brainstorm: "CTO",
+  plan: "CTO",
+  build: "CTO",
+  archive: "CTO",
+  verify: "Verifier",
+  "principle-override": "CEO",
+};
+
+async function specpaperResolveProjectId(
+  ctx: PluginContext,
+  baseUrl: string,
+  apiKey: string | undefined,
+  companyId: string,
+  explicitName: string | null,
+  channelId: string | undefined,
+): Promise<{ projectId: string; projectName: string } | { error: string }> {
+  let nameOrSlug = explicitName?.trim() || null;
+
+  // Fall back to channel mapping
+  if (!nameOrSlug && channelId) {
+    const channelMap = (await ctx.state.get({
+      scopeKind: "instance",
+      stateKey: "channel-project-map",
+    })) as Record<string, string> | null;
+    if (channelMap) {
+      const matchedName = Object.entries(channelMap).find(
+        ([, mappedChannelId]) => mappedChannelId === channelId,
+      )?.[0];
+      if (matchedName) nameOrSlug = matchedName;
+    }
+  }
+
+  if (!nameOrSlug) {
+    return {
+      error:
+        "Could not determine the project. Pass `project:<name>` or run `/clip connect-channel project:<name>` in this channel first.",
+    };
+  }
+
+  // Look up via Paperclip API
+  const res = await paperclipFetch(
+    `${baseUrl}/api/companies/${companyId}/projects`,
+    { method: "GET" },
+    apiKey,
+  );
+  if (!res.ok) {
+    return { error: `Paperclip projects lookup failed: HTTP ${res.status}` };
+  }
+  const projects = (await res.json()) as Array<{ id: string; name: string; slug?: string | null }>;
+  const target = nameOrSlug.toLowerCase();
+  const match = projects.find(
+    (p) =>
+      p.name?.toLowerCase() === target ||
+      (p.slug ?? "").toLowerCase() === target,
+  );
+  if (!match) {
+    return { error: `Project "${nameOrSlug}" not found in this company.` };
+  }
+  return { projectId: match.id, projectName: match.name };
+}
+
+async function specpaperResolveAgentId(
+  ctx: PluginContext,
+  baseUrl: string,
+  apiKey: string | undefined,
+  companyId: string,
+  agentName: string,
+): Promise<{ id: string; name: string } | null> {
+  const res = await paperclipFetch(
+    `${baseUrl}/api/companies/${companyId}/agents`,
+    { method: "GET" },
+    apiKey,
+  );
+  if (!res.ok) return null;
+  const agents = (await res.json()) as Array<{ id: string; name: string }>;
+  const target = agentName.toLowerCase();
+  return agents.find((a) => a.name.toLowerCase() === target) ?? null;
+}
+
+async function handleSpecPaperCommand(
+  ctx: PluginContext,
+  command: string,
+  subcommand: { name: string; options?: InteractionOption[] },
+  cmdCtx: CommandContext | undefined,
+  channelId: string | undefined,
+  companyId: string,
+): Promise<unknown> {
+  const config = (cmdCtx?.config ?? {}) as { enableSpecPaperCommands?: boolean };
+  if (config.enableSpecPaperCommands === false) {
+    return respondToInteraction({
+      type: 4,
+      content:
+        "SpecPaper commands are disabled on this instance. Enable `enableSpecPaperCommands` in the plugin config.",
+      ephemeral: true,
+    });
+  }
+
+  const opts = subcommand.options ?? [];
+  const projectArg = getOption(opts, "project") || null;
+  const baseUrl = cmdCtx?.baseUrl ?? "http://localhost:3100";
+  const apiKey = cmdCtx?.paperclipBoardApiKey;
+
+  const projectResolution = await specpaperResolveProjectId(
+    ctx,
+    baseUrl,
+    apiKey,
+    companyId,
+    projectArg,
+    channelId,
+  );
+  if ("error" in projectResolution) {
+    return respondToInteraction({ type: 4, content: projectResolution.error, ephemeral: true });
+  }
+  const { projectId, projectName } = projectResolution;
+
+  const agentName = SPECPAPER_AGENT_BY_COMMAND[command];
+  if (!agentName) {
+    return respondToInteraction({ type: 4, content: `Unknown SpecPaper command: ${command}`, ephemeral: true });
+  }
+  const agent = await specpaperResolveAgentId(ctx, baseUrl, apiKey, companyId, agentName);
+  if (!agent) {
+    return respondToInteraction({
+      type: 4,
+      content: `No agent named "${agentName}" in this company. Make sure the SpecPaper company is imported.`,
+      ephemeral: true,
+    });
+  }
+
+  // Build the issue title + description
+  let title: string;
+  let description: string;
+  switch (command) {
+    case "propose": {
+      const idea = (getOption(opts, "idea") || "").trim();
+      if (!idea) {
+        return respondToInteraction({ type: 4, content: "Provide `idea:<text>` for /clip propose.", ephemeral: true });
+      }
+      title = `!propose ${idea}`;
+      description = `**SpecPaper proposal request from Discord**\n\nIdea: ${idea}\n\nRun \`specpaper propose "${idea.replace(/"/g, '\\"')}"\` per your skill instructions. Slugify the idea, write \`.specpaper/changes/<slug>/proposal.md\`, run \`docs-sync.sh\`, and comment on this issue with the change slug. Mark this issue \`done\` when the proposal artifact is in place.`;
+      break;
+    }
+    case "brainstorm": {
+      const change = (getOption(opts, "change") || "").trim();
+      const technique = (getOption(opts, "technique") || "").trim();
+      if (!change) return respondToInteraction({ type: 4, content: "Provide `change:<slug>` for /clip brainstorm.", ephemeral: true });
+      title = `!brainstorm ${change}`;
+      description = `**SpecPaper brainstorm request**\n\nChange: \`${change}\`${technique ? `\nTechnique: \`${technique}\`` : ""}\n\nRun the \`specpaper-brainstorm\` skill against this change. Apply the anti-bias protocol, generate ≥50 ideas, surface top 5 with rationale. Write \`.specpaper/changes/${change}/brainstorm.md\`, run \`docs-sync.sh\`, post the top 5 to the project channel via \`discord-sync.sh brainstorm-summary\`. Mark this issue \`done\` when complete.`;
+      break;
+    }
+    case "plan": {
+      const change = (getOption(opts, "change") || "").trim();
+      if (!change) return respondToInteraction({ type: 4, content: "Provide `change:<slug>`.", ephemeral: true });
+      title = `!plan ${change}`;
+      description = `**SpecPaper plan request**\n\nChange: \`${change}\`\n\nRun \`specpaper plan ${change}\`. Read \`COMPANY.md\` principles + the change's \`context.yaml\`. Produce \`spec.md\`, \`design.md\` (with \`## Principles applied\` section), and \`tasks.md\` (with explicit \`Agent:\` routing or globs). Run \`docs-sync.sh\`. Mark done.`;
+      break;
+    }
+    case "build": {
+      const change = (getOption(opts, "change") || "").trim();
+      if (!change) return respondToInteraction({ type: 4, content: "Provide `change:<slug>`.", ephemeral: true });
+      title = `!build ${change}`;
+      description = `**SpecPaper build request**\n\nChange: \`${change}\`\n\nRun \`specpaper build ${change}\`. Wave-based delegation per the routing rules in \`config.yaml\`. End each heartbeat in \`in_review\` until all wave issues close. Trigger verifier + e2e-tester audits in parallel after the last wave.`;
+      break;
+    }
+    case "verify": {
+      const change = (getOption(opts, "change") || "").trim();
+      if (!change) return respondToInteraction({ type: 4, content: "Provide `change:<slug>`.", ephemeral: true });
+      title = `!verify ${change}`;
+      description = `**SpecPaper static spec audit**\n\nChange: \`${change}\`\n\nRun the verifier flow: \`verify.sh collect\` → \`verify-context.sh\` → audit spec acceptance criteria + design.md \`Principles applied\` section against the diff. Produce \`verify-report.md\`. Run \`docs-sync.sh\`. Mark this issue done with PASS/PARTIAL/FAIL in the summary.`;
+      break;
+    }
+    case "archive": {
+      const change = (getOption(opts, "change") || "").trim();
+      if (!change) return respondToInteraction({ type: 4, content: "Provide `change:<slug>`.", ephemeral: true });
+      title = `!archive ${change}`;
+      description = `**SpecPaper archive request**\n\nChange: \`${change}\`\n\nValidate that \`verify-report.md\` and \`e2e-report.md\` are both PASS, then run \`specpaper archive ${change}\`. Move to \`.specpaper/changes/archive/<date>-${change}/\`. Update STATUS.md. Close the change issue + sync tracker.`;
+      break;
+    }
+    case "principle-override": {
+      const principle = (getOption(opts, "principle") || "").trim();
+      const rationale = (getOption(opts, "rationale") || "").trim();
+      if (!principle || !rationale) {
+        return respondToInteraction({
+          type: 4,
+          content: "Provide both `principle:<id>` and `rationale:<text>`.",
+          ephemeral: true,
+        });
+      }
+      title = `!principle-override ${principle}`;
+      description = `**CEO principle override request**\n\nPrinciple: \`${principle}\`\nRationale: ${rationale}\n\nRecord the decision in \`.specpaper/decisions/<id>.md\` with the principle id, the change/project context, and your reasoning. Update affected \`design.md\` Principles applied sections. Mark this issue \`done\` once the decision is recorded.`;
+      break;
+    }
+    default:
+      return respondToInteraction({ type: 4, content: `Unknown SpecPaper command: ${command}`, ephemeral: true });
+  }
+
+  // POST the issue
+  try {
+    const res = await paperclipFetch(
+      `${baseUrl}/api/companies/${companyId}/issues`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          title,
+          description,
+          assigneeAgentId: agent.id,
+          status: "todo",
+          labels: ["specpaper", `from-${command}`],
+        }),
+      },
+      apiKey,
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      return respondToInteraction({
+        type: 4,
+        content: `Failed to create issue: HTTP ${res.status} — ${text.slice(0, 200)}`,
+        ephemeral: true,
+      });
+    }
+    const created = (await res.json()) as { id: string; identifier?: string | null; title?: string };
+    return respondToInteraction({
+      type: 4,
+      embeds: [
+        {
+          title: `Filed: ${created.identifier ?? created.id.slice(0, 8)}`,
+          description: `${created.title ?? title}\n\nProject: **${projectName}** • Assignee: **${agent.name}**`,
+          color: COLORS.GREEN,
+          footer: { text: "Paperclip — SpecPaper" },
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    });
+  } catch (err) {
+    return respondToInteraction({
+      type: 4,
+      content: `Failed to create issue: ${err instanceof Error ? err.message : String(err)}`,
       ephemeral: true,
     });
   }

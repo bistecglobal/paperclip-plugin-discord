@@ -185,9 +185,13 @@ describe("formatAgentRunStarted", () => {
     expect(msg.embeds?.[0]?.description).toContain("BD Agent");
   });
 
-  it("falls back to entityId when agentName missing", () => {
-    const msg = formatAgentRunStarted(makeEvent({ entityId: "fallback-agent" }));
-    expect(msg.embeds?.[0]?.description).toContain("fallback-agent");
+  it("falls back to short agentId when agentName missing", () => {
+    // PR #3 changed the fallback from event.entityId (the runId UUID) to a
+    // short agent identifier so #clips embeds carry useful context.
+    const msg = formatAgentRunStarted(
+      makeEvent({ entityId: "fallback-agent", payload: { agentId: "abc12345-deadbeef" } }),
+    );
+    expect(msg.embeds?.[0]?.description).toContain("agent abc12345");
   });
 
   it("includes task context when issueIdentifier is provided", () => {
