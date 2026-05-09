@@ -410,21 +410,36 @@ export function formatBudgetWarning(data: BudgetWarningData): DiscordMessage {
   };
 }
 
-export function formatAgentRunStarted(event: PluginEvent): DiscordMessage {
-  const p = event.payload as Payload;
-  const agentName = String(p.agentName ?? event.entityId);
+function buildRunContextLines(p: Payload): string {
+  const lines: string[] = [];
+  const project = p.projectName ? String(p.projectName) : null;
   const issueIdentifier = p.issueIdentifier ? String(p.issueIdentifier) : null;
   const issueTitle = p.issueTitle ? String(p.issueTitle) : null;
+  const runId = p.runId ? String(p.runId).slice(0, 8) : null;
 
-  const taskLine = issueIdentifier
-    ? `\nTask: **${issueIdentifier}**${issueTitle ? ` — ${issueTitle}` : ""}`
-    : "";
+  if (project || issueIdentifier) {
+    const parts: string[] = [];
+    if (project) parts.push(`Project: **${project}**`);
+    if (issueIdentifier) {
+      parts.push(`Task: **${issueIdentifier}**${issueTitle ? ` — ${issueTitle}` : ""}`);
+    }
+    lines.push(parts.join(" • "));
+  }
+  if (runId) lines.push(`_run \`${runId}\`_`);
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
+export function formatAgentRunStarted(event: PluginEvent): DiscordMessage {
+  const p = event.payload as Payload;
+  // Prefer agentName; fall back to "agent <short-id>" rather than the runId UUID
+  const shortAgent = String(p.agentId ?? event.entityId).slice(0, 8);
+  const agentName = String(p.agentName ?? `agent ${shortAgent}`);
 
   return {
     embeds: [
       {
         title: `Run Started: ${agentName}`,
-        description: `**${agentName}** has started a new run.${taskLine}`,
+        description: `**${agentName}** has started a new run.${buildRunContextLines(p)}`,
         color: COLORS.BLUE,
         footer: { text: "Paperclip" },
         timestamp: event.occurredAt,
@@ -435,19 +450,14 @@ export function formatAgentRunStarted(event: PluginEvent): DiscordMessage {
 
 export function formatAgentRunFinished(event: PluginEvent): DiscordMessage {
   const p = event.payload as Payload;
-  const agentName = String(p.agentName ?? event.entityId);
-  const issueIdentifier = p.issueIdentifier ? String(p.issueIdentifier) : null;
-  const issueTitle = p.issueTitle ? String(p.issueTitle) : null;
-
-  const taskLine = issueIdentifier
-    ? `\nTask: **${issueIdentifier}**${issueTitle ? ` — ${issueTitle}` : ""}`
-    : "";
+  const shortAgent = String(p.agentId ?? event.entityId).slice(0, 8);
+  const agentName = String(p.agentName ?? `agent ${shortAgent}`);
 
   return {
     embeds: [
       {
         title: `Run Finished: ${agentName}`,
-        description: `**${agentName}** completed successfully.${taskLine}`,
+        description: `**${agentName}** completed successfully.${buildRunContextLines(p)}`,
         color: COLORS.GREEN,
         footer: { text: "Paperclip" },
         timestamp: event.occurredAt,
