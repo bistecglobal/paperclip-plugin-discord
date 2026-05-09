@@ -677,18 +677,81 @@ const plugin = definePlugin({
       });
     }
 
+    // Enrich run-lifecycle event payloads with agentName, issueIdentifier,
+    // issueTitle, and projectName so formatters/topic-routing have something
+    // human-readable to show. Without this, the embed title shows only the
+    // runId UUID and #clips becomes useless.
+    const enrichRunEvent = async (event: PluginEvent): Promise<PluginEvent> => {
+      const payload: Record<string, unknown> = { ...(event.payload as Record<string, unknown>) };
+      const companyId = event.companyId;
+
+      // agent name from agents.list
+      if (!payload.agentName && payload.agentId) {
+        try {
+          const agents = (await ctx.agents.list({ companyId })) as Array<{ id: string; name: string }>;
+          const match = agents.find((a) => a.id === payload.agentId);
+          if (match?.name) payload.agentName = match.name;
+        } catch (err) {
+          ctx.logger.debug("enrichRunEvent: agents.list failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      // Issue + project from issues.get / projects.get
+      if (payload.issueId && (!payload.issueIdentifier || !payload.projectName)) {
+        try {
+          const issue = (await (ctx.issues.get as unknown as (
+            issueId: string,
+            companyId: string,
+          ) => Promise<{
+            identifier?: string | null;
+            title?: string | null;
+            projectId?: string | null;
+            project?: { name?: string | null } | null;
+          } | null>)(String(payload.issueId), companyId));
+          if (issue) {
+            if (!payload.issueIdentifier && issue.identifier) payload.issueIdentifier = issue.identifier;
+            if (!payload.issueTitle && issue.title) payload.issueTitle = issue.title;
+            if (!payload.projectName && issue.project?.name) payload.projectName = issue.project.name;
+            // Project fallback (Paperclip's getIssueByUuid doesn't join project)
+            if (!payload.projectName && issue.projectId) {
+              try {
+                const project = await (ctx.projects.get as unknown as (
+                  projectId: string,
+                  companyId: string,
+                ) => Promise<{ name?: string | null } | null>)(issue.projectId, companyId);
+                if (project?.name) payload.projectName = project.name;
+              } catch {
+                // ignore — project enrichment is best-effort
+              }
+            }
+          }
+        } catch (err) {
+          ctx.logger.debug("enrichRunEvent: issues.get failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      return { ...event, payload };
+    };
+
     if (config.notifyOnAgentError) {
-      ctx.events.on("agent.run.failed", (event: PluginEvent) =>
-        notify(event, formatSessionFailure, errorsChannelId ?? undefined),
-      );
+      ctx.events.on("agent.run.failed", async (event: PluginEvent) => {
+        const enriched = await enrichRunEvent(event);
+        await notify(enriched, formatSessionFailure, errorsChannelId ?? undefined);
+      });
     }
 
-    ctx.events.on("agent.run.started", (event: PluginEvent) =>
-      notify(event, formatAgentRunStarted, bdPipelineChannelId ?? undefined),
-    );
-    ctx.events.on("agent.run.finished", (event: PluginEvent) =>
-      notify(event, formatAgentRunFinished, bdPipelineChannelId ?? undefined),
-    );
+    ctx.events.on("agent.run.started", async (event: PluginEvent) => {
+      const enriched = await enrichRunEvent(event);
+      await notify(enriched, formatAgentRunStarted, bdPipelineChannelId ?? undefined);
+    });
+    ctx.events.on("agent.run.finished", async (event: PluginEvent) => {
+      const enriched = await enrichRunEvent(event);
+      await notify(enriched, formatAgentRunFinished, bdPipelineChannelId ?? undefined);
+    });
 
     // ===================================================================
     // Phase 1: Escalation - human-in-the-loop support
