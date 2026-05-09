@@ -223,6 +223,25 @@ async function enrichIssueNotificationPayload(
       if (payload.completedAt == null && issue.completedAt) payload.completedAt = String(issue.completedAt);
       if (payload.updatedAt == null && issue.updatedAt) payload.updatedAt = String(issue.updatedAt);
       if (payload.projectName == null && issue.project?.name) payload.projectName = issue.project.name;
+      // Fallback: when issues.get doesn't join the project (Paperclip's getIssueByUuid
+      // returns the bare row), fetch the project separately. Without this, topic
+      // routing fails silently because projectName never lands in the payload.
+      if (payload.projectName == null && (issue as { projectId?: string }).projectId) {
+        try {
+          // Worker-side projects.get is positional: (projectId, companyId), like issues.get.
+          // The d.ts says it takes a single params object but worker-rpc-host wraps it.
+          const projectId = (issue as { projectId?: string }).projectId!;
+          const project = await (ctx.projects.get as unknown as (
+            projectId: string,
+            companyId: string,
+          ) => Promise<{ name?: string | null } | null>)(projectId, companyId);
+          if (project?.name) payload.projectName = project.name;
+        } catch (err) {
+          ctx.logger.warn("enrich: projects.get fallback failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     }
 
     if (String(payload.status ?? "") === "done") {
