@@ -69,6 +69,13 @@ const manifest: PaperclipPluginManifestV1 = {
         description: "The Discord server ID to post notifications to.",
         default: DEFAULT_CONFIG.defaultGuildId,
       },
+      projectsCategoryId: {
+        type: "string",
+        title: "Projects Category ID (optional)",
+        description:
+          "Discord category channel ID. When set, the create_channel tool with useCategoryFromConfig=true creates per-project channels under this category. Used by companies that programmatically provision channels per project (e.g. SpecPaper).",
+        default: "",
+      },
       defaultChannelId: {
         type: "string",
         title: "Default Channel ID",
@@ -426,6 +433,62 @@ const manifest: PaperclipPluginManifestV1 = {
           cooldownMinutes: { type: "number", description: "Min minutes between triggers (default 60)" },
         },
         required: ["companyId", "watchName", "patterns", "responseTemplate"],
+      },
+    },
+    {
+      name: "create_channel",
+      displayName: "Create Discord Channel",
+      description:
+        "Create a Discord text channel, optionally under a category. Used by companies that programmatically provision per-project channels (e.g. SpecPaper). Requires the bot to have MANAGE_CHANNELS permission.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          companyId: { type: "string", description: "Company ID (used to resolve guild + bot token)" },
+          name: { type: "string", description: "Channel name (without leading #)" },
+          topic: { type: "string", description: "Optional topic / description shown under the channel name" },
+          parentId: {
+            type: "string",
+            description: "Optional category (parent) channel ID. If omitted and useCategoryFromConfig is true, falls back to the configured projectsCategoryId.",
+          },
+          useCategoryFromConfig: {
+            type: "boolean",
+            description: "If true and parentId is not provided, use the company's configured projectsCategoryId.",
+          },
+          type: {
+            type: "number",
+            description: "Channel type. 0 = GUILD_TEXT (default), 5 = GUILD_ANNOUNCEMENT.",
+          },
+        },
+        required: ["companyId", "name"],
+      },
+    },
+    {
+      name: "discord_post",
+      displayName: "Post Message to Discord Channel",
+      description:
+        "Post a plain or markdown message to a Discord channel by ID. Use for agent-driven posts that aren't auto-emitted by Paperclip issue lifecycle events (status digests, brainstorm summaries, principle-conflict announcements, project-bootstrap welcome posts).",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          channelId: { type: "string", description: "Discord channel ID" },
+          content: { type: "string", description: "Markdown content (max 2000 chars per Discord)" },
+        },
+        required: ["channelId", "content"],
+      },
+    },
+    {
+      name: "connect_channel",
+      displayName: "Connect Channel to Project",
+      description:
+        "Map a Discord channel to a Paperclip project for routing. Programmatic equivalent of the /clip connect-channel slash command. Persisted in the channel-project-map plugin state.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          companyId: { type: "string", description: "Company ID" },
+          channelId: { type: "string", description: "Discord channel ID" },
+          projectSlug: { type: "string", description: "Paperclip project slug" },
+        },
+        required: ["companyId", "channelId", "projectSlug"],
       },
     },
   ],

@@ -210,6 +210,7 @@ curl -X POST http://127.0.0.1:3100/api/plugins/install \
 | `enableProactiveSuggestions` | No | Allow agents to register watch conditions (default: false) |
 | `proactiveScanIntervalMinutes` | No | How often to check watches (default: 15, min: 5, max: 60) |
 | `paperclipBaseUrl` | No | Base URL for Paperclip API calls (default: http://localhost:3100) |
+| `projectsCategoryId` | No | Discord category ID. When `create_channel` is called with `useCategoryFromConfig=true`, channels are created under this category. Used by SpecPaper-style per-project channel provisioning. |
 
 ## Agent tools
 
@@ -221,6 +222,9 @@ curl -X POST http://127.0.0.1:3100/api/plugins/install \
 | `discuss_with_agent` | 2 | Start a multi-turn agent-to-agent discussion |
 | `register_custom_command` | 4 | Register a !command for Discord users |
 | `register_watch` | 5 | Register a watch condition for proactive suggestions |
+| `create_channel` | bistecglobal fork | Create a Discord text channel, optionally under a category. Requires `MANAGE_CHANNELS` |
+| `discord_post` | bistecglobal fork | Post a plain or markdown message to a channel by ID |
+| `connect_channel` | bistecglobal fork | Map a Discord channel to a Paperclip project (programmatic equivalent of `/clip connect-channel`) |
 
 ## Credits
 

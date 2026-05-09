@@ -14,6 +14,8 @@ import {
   getApplicationId,
   registerSlashCommands,
   respondToInteraction,
+  createChannel,
+  postPlainMessage,
   type DiscordEmbed,
   type DiscordComponent,
 } from "./discord-api.js";
@@ -1172,6 +1174,141 @@ const plugin = definePlugin({
       const cid = await resolveCompanyId(ctx);
       await checkWatches(ctx, token, cid, defaultChannelId);
     });
+
+    // ===================================================================
+    // Channel-management tools (bistecglobal fork addition)
+    // create_channel + discord_post + connect_channel
+    // ===================================================================
+
+    ctx.tools.register(
+      "create_channel",
+      {
+        displayName: "Create Discord Channel",
+        description:
+          "Create a Discord text channel, optionally under a category. Used by companies that programmatically provision per-project channels (e.g. SpecPaper). Requires the bot to have MANAGE_CHANNELS permission.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            companyId: { type: "string", description: "Company ID" },
+            name: { type: "string", description: "Channel name (without leading #)" },
+            topic: { type: "string", description: "Optional topic" },
+            parentId: { type: "string", description: "Optional category (parent) channel ID" },
+            useCategoryFromConfig: {
+              type: "boolean",
+              description:
+                "If true and parentId is not provided, use the configured projectsCategoryId.",
+            },
+            type: { type: "number", description: "0 = GUILD_TEXT (default), 5 = GUILD_ANNOUNCEMENT" },
+          },
+          required: ["companyId", "name"],
+        },
+      },
+      async (params) => {
+        const p = params as Record<string, unknown>;
+        const guildId = config.defaultGuildId;
+        if (!guildId) {
+          return { error: "defaultGuildId is not configured." };
+        }
+        const explicitParent = typeof p.parentId === "string" ? p.parentId : undefined;
+        const parentId = explicitParent
+          ? explicitParent
+          : p.useCategoryFromConfig === true
+          ? (config as { projectsCategoryId?: string }).projectsCategoryId || undefined
+          : undefined;
+
+        const channel = await createChannel(ctx, token, guildId, String(p.name), {
+          type: (p.type === 5 ? 5 : 0) as 0 | 5,
+          parentId,
+          topic: p.topic ? String(p.topic) : undefined,
+        });
+        if (!channel) {
+          return { error: "Channel creation failed (see logs)." };
+        }
+        ctx.logger.info("Channel created", {
+          channelId: channel.id,
+          name: channel.name,
+          guildId,
+          parentId,
+        });
+        const result = {
+          channelId: channel.id,
+          name: channel.name,
+          parentId: channel.parent_id ?? null,
+          type: channel.type,
+        };
+        return { content: JSON.stringify(result), data: result };
+      },
+    );
+
+    ctx.tools.register(
+      "discord_post",
+      {
+        displayName: "Post Message to Discord Channel",
+        description:
+          "Post a plain or markdown message to a Discord channel by ID. Use for agent-driven posts that aren't auto-emitted by Paperclip issue-lifecycle events.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            channelId: { type: "string", description: "Discord channel ID" },
+            content: { type: "string", description: "Markdown content (max 2000 chars)" },
+          },
+          required: ["channelId", "content"],
+        },
+      },
+      async (params) => {
+        const p = params as Record<string, unknown>;
+        const channelId = String(p.channelId);
+        const content = String(p.content).slice(0, 2000);
+        const ok = await postPlainMessage(ctx, token, channelId, content);
+        if (!ok) {
+          return { error: "discord_post failed (see logs)." };
+        }
+        return { content: JSON.stringify({ ok: true }), data: { ok: true } };
+      },
+    );
+
+    ctx.tools.register(
+      "connect_channel",
+      {
+        displayName: "Connect Channel to Project",
+        description:
+          "Map a Discord channel to a Paperclip project for routing. Programmatic equivalent of /clip connect-channel.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            companyId: { type: "string", description: "Company ID (recorded for audit; mapping is instance-scoped)" },
+            channelId: { type: "string", description: "Discord channel ID" },
+            projectSlug: { type: "string", description: "Paperclip project slug" },
+          },
+          required: ["companyId", "channelId", "projectSlug"],
+        },
+      },
+      async (params) => {
+        const p = params as Record<string, unknown>;
+        const channelId = String(p.channelId);
+        const projectSlug = String(p.projectSlug).trim();
+        if (!projectSlug) {
+          return { error: "projectSlug must be non-empty." };
+        }
+
+        const existing = (await ctx.state.get({
+          scopeKind: "instance",
+          stateKey: "channel-project-map",
+        })) as Record<string, string> | null;
+
+        const channelMap = existing ?? {};
+        channelMap[projectSlug] = channelId;
+
+        await ctx.state.set(
+          { scopeKind: "instance", stateKey: "channel-project-map" },
+          channelMap,
+        );
+
+        ctx.logger.info("Channel-project mapping set", { projectSlug, channelId });
+        const result = { ok: true, projectSlug, channelId };
+        return { content: JSON.stringify(result), data: result };
+      },
+    );
 
     // ===================================================================
     // Daily Digest Job

@@ -324,3 +324,84 @@ export function respondToInteraction(data: {
     },
   };
 }
+
+export interface DiscordChannelCreated {
+  id: string;
+  name: string;
+  type: number;
+  parent_id?: string | null;
+  topic?: string | null;
+}
+
+/**
+ * Create a Discord channel in a guild.
+ * Requires the bot to have the MANAGE_CHANNELS permission.
+ *
+ * @param type 0 = GUILD_TEXT (default), 5 = GUILD_ANNOUNCEMENT
+ */
+export async function createChannel(
+  ctx: PluginContext,
+  token: string,
+  guildId: string | number,
+  name: string,
+  options: {
+    type?: 0 | 5;
+    parentId?: string;
+    topic?: string;
+    rateLimitPerUser?: number;
+  } = {},
+): Promise<DiscordChannelCreated | null> {
+  const safeGuildId = normalizeDiscordPathId(guildId);
+  try {
+    const response = await withRetry(async () => {
+      const res = await discordFetch(ctx, token, `/guilds/${safeGuildId}/channels`, {
+        method: "POST",
+        body: {
+          name,
+          type: options.type ?? 0,
+          parent_id: options.parentId,
+          topic: options.topic,
+          rate_limit_per_user: options.rateLimitPerUser,
+        },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        const err = new Error(`Discord API error: ${res.status}`) as Error & {
+          status?: number;
+          headers?: Headers;
+        };
+        err.status = res.status;
+        err.headers = res.headers;
+        ctx.logger.warn("createChannel failed", {
+          status: res.status,
+          body: text,
+          guildId: safeGuildId,
+          name,
+        });
+        throw err;
+      }
+      return res;
+    });
+    return (await response.json()) as DiscordChannelCreated;
+  } catch (error) {
+    ctx.logger.error("createChannel delivery failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/**
+ * Post a plain or markdown message to a channel by ID. Thin wrapper over postEmbed
+ * for callers that just need text content. Used by agent tools that need to push
+ * structured updates (status digests, brainstorm summaries, etc.) outside the
+ * issue-lifecycle auto-emit path.
+ */
+export async function postPlainMessage(
+  ctx: PluginContext,
+  token: string,
+  channelId: string | number,
+  content: string,
+): Promise<boolean> {
+  return postEmbed(ctx, token, channelId, { content });
+}
